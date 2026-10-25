@@ -123,17 +123,25 @@ export function World() {
         <div className="stack">
           <section className="card">
             <h2>Warning signs</h2>
-            <h3><Term name="lookalike">Lookalike domains</Term> of {signals.watched_domains.join(', ')} <span className="muted">· {signals.lookalike_domains.length} registered and resolving</span></h3>
-            <p className="muted small">Leads, not verdicts: brands often register their own typos defensively. Each needs triage.</p>
+            <h3><Term name="lookalike">Lookalike domains</Term> of {signals.watched_domains.join(', ')} <span className="muted">· {signals.lookalike_domains.length} found</span></h3>
+            <p className="muted small">Found two ways: typo variants that resolve in DNS, and new TLS certificates spotted by the
+              live <Term name="certificate transparency">certificate-transparency</Term> watcher (often before the site is used).
+              Leads, not verdicts: brands register their own typos too. Each needs triage.{' '}
+              <a href="/api/misp/lookalikes">Download as a MISP event</a>.</p>
             <div className="scroll">
               <table className="data">
-                <thead><tr><th>Domain</th><th>How it imitates</th><th>Resolves to</th></tr></thead>
+                <thead><tr><th>Domain</th><th>How it imitates</th><th>Found by</th></tr></thead>
                 <tbody>
                   {signals.lookalike_domains.map((d) => (
                     <tr key={d.domain}>
                       <td className="mono">{d.domain}</td>
                       <td>{(d.labels.find((l) => l.startsWith('technique:')) ?? '').replace('technique:', '').replace(/-/g, ' ')}</td>
-                      <td className="mono small">{d.ips.slice(0, 2).join(', ')}</td>
+                      <td className="small">{d.labels.includes('sample')
+                        ? <span className="muted">replayed sample</span>
+                        : d.found_by === 'ct-watcher' && d.ct
+                        ? <span title={`Certificate for ${d.ct.name}, issued by ${d.ct.issuer}, valid from ${d.ct.not_before}`}>
+                            <span className="badge high">new certificate</span> {d.ct.log}</span>
+                        : <span className="mono">DNS · {(d.ips ?? []).slice(0, 1).join(', ')}</span>}</td>
                     </tr>
                   ))}
                 </tbody>

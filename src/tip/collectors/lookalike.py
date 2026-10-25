@@ -120,6 +120,53 @@ def to_indicator(brand: str, domain: str, kind: str, ips: list[str]) -> Any:
     )
 
 
+def from_ct_hit(hit: dict[str, Any]) -> Any:
+    """A hit from the Go certificate-transparency watcher, as a STIX indicator.
+
+    Same ID scheme as the DNS lookalikes, so a domain found both ways is one indicator (updated by the latest source).
+    """
+    when = hit.get("not_before") or "unknown date"
+    sample = str(hit.get("log", "")).startswith("replay:")
+    if sample:  # replayed demo names: never present them as certificates seen in a real log
+        return stix.indicator(
+            "ct-watcher",
+            "domain-name",
+            hit["domain"],
+            name=f"Sample lookalike of {hit['brand']}: {hit['domain']}",
+            description=f"From a replayed sample list ({hit.get('log')}), not a live CT log. "
+            "Demonstrates matching only.",
+            indicator_types=["anomalous-activity"],
+            labels=["lookalike", "sample", f"brand:{hit['brand']}", f"technique:{hit.get('technique')}"],
+            confidence=5,
+            extra={"x_tip_ct": {"name": hit.get("name"), "log": hit.get("log"), "sample": True}},
+        )
+    return stix.indicator(
+        "ct-watcher",
+        "domain-name",
+        hit["domain"],
+        name=f"Lookalike of {hit['brand']}: {hit['domain']}",
+        description=(
+            f"TLS certificate for {hit['name']} ({hit.get('technique')}) "
+            f"issued by {hit.get('issuer') or 'an unknown CA'}, "
+            f"valid from {when}, published in CT log {hit.get('log')} at index {hit.get('index')}. "
+            "A certificate usually appears before the site is used; unverified, needs triage."
+        ),
+        indicator_types=["anomalous-activity"],
+        labels=[
+            "lookalike",
+            "needs-triage",
+            "certificate-transparency",
+            f"brand:{hit['brand']}",
+            f"technique:{hit.get('technique')}",
+        ],
+        confidence=40,
+        reference_url=f"https://crt.sh/?q={hit['domain']}",
+        extra={
+            "x_tip_ct": {k: hit.get(k) for k in ("name", "log", "index", "issuer", "not_before", "precert", "seen_at")}
+        },
+    )
+
+
 def collect(brands: list[str], use_crtsh: bool = False, workers: int = 48) -> Collected:
     objects: list[Any] = [stix.identity("lookalike")]
     lines = []

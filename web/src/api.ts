@@ -10,7 +10,8 @@ export interface Actor {
 }
 
 export interface Signals {
-  lookalike_domains: { domain: string; ips: string[]; labels: string[] }[];
+  lookalike_domains: { domain: string; ips: string[] | null; labels: string[]; found_by: 'lookalike' | 'ct-watcher';
+    ct: { name: string; log: string; issuer: string; not_before: string } | null }[];
   watched_domains: string[];
   sanctioned_addresses_by_chain: { chain: string; addresses: number }[];
   known_exploited: { cve: string; vendor: string; product: string; added: string; ransomware: boolean }[];

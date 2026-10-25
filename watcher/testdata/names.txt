@@ -1,0 +1,19 @@
+# Sample certificate names for offline replay (one per line). Mix of lookalikes and ordinary names.
+www.coinbase.com
+api.coinbase.com
+coinbase-login.com
+c0inbase.com
+login.coinbase-verify.app
+coinbsae.com
+coinbase.co
+xn--cinbase-9ig.com
+coinbase.support-wallet-recovery.info
+coinbas.com
+cooinbase.com
+coinbasee.net
+coinbase-careers.io
+example.com
+mail.google.com
+github.com
+shop.example.org
+coin-base-help.com

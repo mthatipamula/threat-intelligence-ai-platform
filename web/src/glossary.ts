@@ -27,5 +27,6 @@ export const GLOSSARY: Record<string, string> = {
   eval: 'An evaluation: running the AI on cases where the right answer is known, and measuring how often it gets them right.',
   recall: 'Of everything that really happened, how much the AI found.',
   precision: 'Of everything the AI reported, how much was real.',
+  'certificate transparency': 'Public, append-only logs where every trusted TLS certificate must be published. Watching them reveals a lookalike phishing domain as soon as it gets a certificate, usually before the first phishing email.',
   verifier: 'Plain code (not AI) that checks every AI finding cites real evidence the tools returned. Unsupported findings are rejected.',
 };

@@ -8,6 +8,7 @@ dollar figure or indicator that isn't in these facts or the cited evidence.
 
 from typing import Any
 
+import duckdb
 import psycopg
 
 from tip import store
@@ -83,6 +84,22 @@ def compute(pg: psycopg.Connection, inv: dict[str, Any]) -> dict[str, Any]:
             sanctioned[w["to_address"].lower()],
             "OFAC-sanctioned destination of stolen funds",
         )
+
+    # A hash is only an indicator if it's specific to the attack: the curl or python binary that ordinary processes
+    # also run would flag every machine. Drop hashes that appear in events nobody cited.
+    hashes = [v for (k, v) in indicators if k == "sha256"]
+    if hashes:
+        with duckdb.connect(inv.get("logs") or str(settings().logs_db), read_only=True) as con:
+            common = {
+                r[0]
+                for r in con.execute(
+                    "SELECT DISTINCT sha256 FROM endpoint_events WHERE sha256 IN (SELECT unnest(?)) "
+                    "AND event_id NOT IN (SELECT unnest(?))",
+                    [hashes, cited],
+                ).fetchall()
+            }
+        for h in common:
+            indicators.pop(("sha256", h), None)
 
     times = [e["ts"] for e in events.values()]
     people = sorted({str(e[k]) for e in events.values() for k in ("user_name", "principal") if e.get(k)})
