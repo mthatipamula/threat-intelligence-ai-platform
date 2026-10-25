@@ -1,0 +1,20 @@
+# Local stack. Postgres holds the STIX 2.1 store (and, from step 2, pgvector embeddings for RAG).
+# Synthetic internal logs live in DuckDB (data/logs.duckdb), standing in for the SIEM.
+name: threat-intel
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: tip
+      POSTGRES_USER: tip
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./scripts/init-env.sh}
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tip -d tip"]
+      interval: 3s
+      retries: 30
+
+volumes:
+  pgdata:

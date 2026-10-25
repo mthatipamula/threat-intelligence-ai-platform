@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Runs the platform's CLI from source: ./tip --help
+cd "$(dirname "$0")"
+PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" exec uv run --quiet python -m tip "$@"
