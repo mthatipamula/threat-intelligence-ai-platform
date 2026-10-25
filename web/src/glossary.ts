@@ -1,0 +1,18 @@
+// Plain-English definitions shown on hover, so the console can be read (and demoed) without a security background.
+export const GLOSSARY: Record<string, string> = {
+  'ATT&CK': 'MITRE ATT&CK: a public catalogue of the techniques attackers use, each with an ID like T1566 (phishing). Lets teams describe attacks in a shared language.',
+  technique: 'One specific attacker method from MITRE ATT&CK, e.g. T1550.004 "use a stolen browser session cookie".',
+  tactic: 'The attacker’s goal at a stage of an attack, e.g. initial access, credential access, exfiltration. Techniques are grouped under tactics.',
+  TTP: 'Tactics, techniques and procedures: how an attacker operates. Harder for them to change than domains or IP addresses.',
+  IOC: 'Indicator of compromise: a concrete artefact of an attack, such as a malicious domain, IP address, file hash or wallet address.',
+  OFAC: 'US Treasury’s Office of Foreign Assets Control. It publishes sanctioned parties, including crypto addresses; sending funds to them is illegal for US companies.',
+  OSINT: 'Open-source intelligence: information from public sources, such as government advisories, certificate logs and sanctions lists.',
+  STIX: 'A standard format for threat intelligence. Lets tools share and link intel (this actor uses that technique, this domain indicates that malware).',
+  lookalike: 'A domain made to look like a real one (c0inbase.com, coinbase-login.com) to trick people. Often registered days before a phishing campaign.',
+  'Lazarus Group': 'A North Korean state-sponsored hacking group behind many of the largest crypto thefts. Also tracked as TraderTraitor, Diamond Sleet and other names.',
+  'session cookie': 'What keeps you signed in to a website. If stolen, an attacker can use the session without your password or MFA.',
+  'hot wallet': 'A crypto wallet whose keys are online so withdrawals can be automated. Convenient, and therefore a prime target.',
+  KEV: 'CISA’s Known Exploited Vulnerabilities list: software flaws attackers are actively using right now. Patch these first.',
+  RAG: 'Retrieval-augmented generation: the AI searches a document library and must ground its answer in the passages it finds.',
+  verifier: 'Plain code (not AI) that checks every AI finding cites real evidence the tools returned. Unsupported findings are rejected.',
+};
