@@ -8,6 +8,10 @@ const TACTIC_ORDER = ['reconnaissance', 'resource-development', 'initial-access'
   'privilege-escalation', 'stealth', 'defense-impairment', 'defense-evasion', 'credential-access', 'discovery',
   'lateral-movement', 'collection', 'command-and-control', 'exfiltration', 'impact'];
 const tacticRank = (t: string) => (TACTIC_ORDER.indexOf(t) + 1 || TACTIC_ORDER.length + 1);
+const ACTORS = [
+  { name: 'Contagious Interview', why: 'ATT&CK\u2019s name for the fake job-interview campaigns aimed at developers. The malware it lists, BeaverTail and InvisibleFerret, is what the attack in our logs imitates.' },
+  { name: 'Lazarus Group', why: 'The umbrella North Korean group behind many of the largest crypto thefts. Operation Dream Job is its long-running fake job-offer campaign.' },
+];
 const pretty = (s: string) => s.replace(/-/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
 /** Screen 1: what's happening in the world - the threat actor, warning signs, and where the intelligence comes from. */
@@ -18,12 +22,16 @@ export function World() {
   const [error, setError] = useState<string | null>(null);
   const [fullBio, setFullBio] = useState(false);
   const [openTactic, setOpenTactic] = useState<string | null>('initial-access');
+  const [actorName, setActorName] = useState(ACTORS[0].name);
 
   useEffect(() => {
-    Promise.all([api.actor('Lazarus Group'), api.signals(), api.overview()])
-      .then(([a, s, o]) => { setActor(a); setSignals(s); setOverview(o); })
+    Promise.all([api.signals(), api.overview()])
+      .then(([s, o]) => { setSignals(s); setOverview(o); })
       .catch((e: Error) => setError(e.message));
   }, []);
+  useEffect(() => {
+    api.actor(actorName).then((a) => { setActor(a); setFullBio(false); }).catch((e: Error) => setError(e.message));
+  }, [actorName]);
 
   if (error) return <p className="error">Could not load intelligence: {error}. Is the API running (./tip serve)?</p>;
   if (!actor || !signals || !overview) return <p className="muted">Loading intelligence…</p>;
@@ -48,14 +56,22 @@ export function World() {
           <Term name="ATT&CK" /> catalogue, US government advisories and the <Term name="OFAC" /> sanctions list.
         </p>
         <p>
-          The headline threat for crypto exchanges is the <Term name="Lazarus Group" />, North Korea’s state hackers. Their
-          favourite way in is a fake job offer to an engineer. The warning signs on the right are things to watch:
+          The headline threat for crypto exchanges is North Korea’s state hackers: the <Term name="Lazarus Group" /> umbrella,
+          and the group <Term name="ATT&CK" /> calls <b>Contagious Interview</b>, whose way in is a fake job interview for an
+          engineer. Switch between them on the card below. The warning signs on the right are things to watch:
           domains impersonating the exchange, wallets we must never pay, and software flaws being exploited right now.
         </p>
       </Explainer>
 
       <div className="grid two">
         <section className="card actor">
+          <div className="segmented actor-switch" role="radiogroup" aria-label="Threat group">
+            {ACTORS.map((a) => (
+              <button key={a.name} role="radio" aria-checked={actorName === a.name} className={actorName === a.name ? 'on' : ''}
+                onClick={() => setActorName(a.name)}>{a.name}</button>
+            ))}
+          </div>
+          <p className="muted small why">{ACTORS.find((a) => a.name === actorName)?.why}</p>
           <div className="card-head">
             <div>
               <div className="eyebrow">Threat actor · <a href={actor.url} target="_blank" rel="noreferrer">{actor.attack_id}</a></div>
