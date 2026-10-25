@@ -8,7 +8,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from tip import collectors, store
+from tip import collectors, library, store
+from tip.agent import graph
 from tip.config import settings
 from tip.logs import generator
 
@@ -16,9 +17,11 @@ app = typer.Typer(no_args_is_help=True, help="Threat intelligence AI platform")
 db_app = typer.Typer(no_args_is_help=True, help="STIX store database")
 intel_app = typer.Typer(no_args_is_help=True, help="Query collected threat intelligence")
 logs_app = typer.Typer(no_args_is_help=True, help="Synthetic internal logs (the SIEM stand-in)")
+library_app = typer.Typer(no_args_is_help=True, help="Report library for RAG (advisories, ATT&CK, internal docs)")
 app.add_typer(db_app, name="db")
 app.add_typer(intel_app, name="intel")
 app.add_typer(logs_app, name="logs")
+app.add_typer(library_app, name="library")
 console = Console()
 
 
@@ -126,6 +129,67 @@ def logs_sql(query: str, limit: int = 50) -> None:
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r, strict=True)) for r in cur.fetchmany(limit)]
     _table(rows)
+
+
+@library_app.command("build")
+def library_build() -> None:
+    """Fetch advisories, load internal docs and ATT&CK write-ups, chunk and embed them (first run downloads the "
+    "model)."""
+    with store.connect() as conn, console.status("building the report library..."):
+        counts = library.build(conn)
+    console.print(counts)
+    with store.connect() as conn:
+        _table(library.stats(conn), "Report library")
+
+
+@library_app.command("search")
+def library_search(query: str, limit: int = 5) -> None:
+    """Hybrid (semantic + keyword) search, e.g. `tip library search "fake recruiter coding test"`."""
+    with store.connect() as conn:
+        rows = library.search(conn, query, limit=limit)
+    _table([{"chunk": r["id"], "score": r["score"], "title": r["title"], "text": r["text"][:160]} for r in rows])
+
+
+@app.command()
+def investigate(
+    question: str, live: Annotated[bool, typer.Option(help="Use Claude instead of mock mode")] = False
+) -> None:
+    """Run an investigation in the terminal, e.g. `tip investigate "Are we affected by fake job interview attacks?"`."""
+    mode = "live" if live else "mock"
+    with store.connect() as conn:
+        run_id = graph.start(conn, question, mode)
+    with console.status(f"investigating ({mode})..."):
+        graph.run(run_id, question, mode)
+    with store.connect() as conn:
+        r = graph.get(conn, run_id)
+    if r["status"] != "done":
+        console.print(f"[red]{r['status']}[/red]: {r['error']}")
+        raise typer.Exit(1)
+    report, check = r["report"], r["verification"]
+    console.print(f"[bold]{report['verdict']}[/bold] (confidence {report['confidence']})\n{report['summary']}\n")
+    _table(
+        [
+            {
+                "status": c["status"],
+                "when": f["when"][:16],
+                "severity": f["severity"],
+                "finding": f["title"],
+                "evidence": ", ".join(f["evidence_ids"][:4]),
+                "problems": "; ".join(c["problems"]),
+            }
+            for f, c in zip(report["findings"], check["findings"], strict=True)
+        ],
+        "Findings",
+    )
+    console.print(f"{check['accepted']} accepted, {check['rejected']} rejected. Usage: {r['usage']}. Run id {run_id}")
+
+
+@app.command()
+def serve(port: int = 8000, reload: bool = False) -> None:
+    """Start the API (and the built web UI, if web/dist exists) on http://localhost:PORT."""
+    import uvicorn
+
+    uvicorn.run("tip.api:app", host="127.0.0.1", port=port, reload=reload)
 
 
 if __name__ == "__main__":

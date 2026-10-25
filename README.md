@@ -14,13 +14,13 @@ AI-assisted threat intelligence for a crypto exchange. The platform:
 | Step | What | Status |
 |---|---|---|
 | 1 | Local stack, OSINT collection, STIX 2.1 store, synthetic logs with a hidden attack | **done** |
-| 2 | Investigation agent (LangGraph): tools, RAG over reports, cited findings | next |
-| 3 | Detection engineering: Sigma → SPL / KQL / SQL, replay-tested against the logs | |
-| 4 | Intelligence briefs (technical and executive), evals, prompt-injection tests | |
-| 5 | Review console (React): evidence beside each claim, approve or reject | |
+| 2 | Investigation agent (LangGraph): tools, RAG over reports, cited and verified findings, plus the web console (screens 1-2) | **done** |
+| 3 | Detection engineering: Sigma → SPL / KQL / SQL, replay-tested against the logs (console screen 3) | next |
+| 4 | Intelligence briefs (technical and executive), evals, prompt-injection tests (screens 4-5) | |
+| 5 | Console polish: approve or reject detections and briefs; demo script | |
 | 6 | Go lookalike-domain watcher on Certificate Transparency logs; MISP sync | |
 
-## Architecture (step 1)
+## Architecture
 
 ```
 OSINT feeds                                     STIX 2.1 store (Postgres)
@@ -33,6 +33,14 @@ OSINT feeds                                     STIX 2.1 store (Postgres)
 Synthetic internal logs (DuckDB, the SIEM stand-in)
   auth_events · endpoint_events · network_events · cloud_audit · wallet_withdrawals
   scenario_events: the answer key (each attack event, its step and ATT&CK technique)
+
+Report library (Postgres + pgvector)                 Investigation (LangGraph)
+  CISA / FBI advisories on DPRK crypto theft           investigate ─► draft ─► verify ─┬─► done
+  ATT&CK write-ups (DPRK groups, techniques)           (tools)      (JSON)  (code)    └─► revise ─► verify
+  Meridian incidents and runbooks (synthetic)          brain: mock playbook (free) or Claude Opus 5.5 (live)
+  hybrid search: local embeddings + full text, RRF
+
+FastAPI (src/tip/api.py) ─► React console (web/): 1 What's happening · 2 Are we affected? · 3-5 coming
 ```
 
 ## Run it
@@ -45,8 +53,17 @@ docker compose up -d --wait  # Postgres (pgvector) on localhost:5433
 uv sync                      # dependencies
 ./tip collect                # all collectors; about 15 seconds after the first ATT&CK download
 ./tip logs generate          # 7 days of synthetic logs with the hidden attack
+./tip library build          # advisories + ATT&CK + internal docs, embedded (first run downloads ~130 MB model)
+(cd web && npm install && npm run build)
+./tip serve                  # console and API on http://localhost:8000
 uv run pytest                # 16 tests (database tests skip when Postgres isn't running)
 ```
+
+For UI development, run `./tip serve` and `cd web && npm run dev` (http://localhost:5174, proxies `/api`).
+
+**Live mode** (Claude decides which tools to call): add `ANTHROPIC_API_KEY` to `.env`. Without it, investigations run in
+mock mode: a fixed analyst playbook over the same tools, free and repeatable. Mock mode deliberately adds one
+unsupported claim so the console shows the verifier rejecting it.
 
 To enable ThreatFox, add a free key from https://auth.abuse.ch to `.env` as `ABUSECH_AUTH_KEY`.
 
@@ -58,7 +75,37 @@ To enable ThreatFox, add a free key from https://auth.abuse.ch to `.env` as `ABU
 ./tip intel search "dream job" --type campaign
 ./tip intel lookup 0x098B716B8Aaf21512996dC57EB0615e2383E2f96 # OFAC-sanctioned (Lazarus, Ronin bridge theft)
 ./tip logs sql "SELECT strftime(ts,'%a %H:%M') t, step, technique_id, description FROM scenario_events ORDER BY ts"
+./tip library search "fake recruiter coding test"             # hybrid search over the report library
+./tip investigate "Are we affected by fake job interview attacks?"   # add --live for Claude
 ```
+
+## The investigation agent
+
+The agent can only touch data through its tools (`src/tip/agent/tools.py`). It never writes SQL.
+
+| Tool | What it does |
+|---|---|
+| `run_hunt` | One of 10 reviewed queries for attacker *behaviour*: node spawning curl/python, programs in hidden folders, browser cookie theft, session reuse from a new location, people reading production secrets, new access keys, internal-API withdrawals, and more |
+| `search_events` | Filtered search of one log table; tables and columns are whitelisted, values are bound parameters |
+| `user_timeline` | Everything one person did across all log sources, in time order |
+| `match_logs_to_intel` | Every domain, IP and withdrawal address in the logs checked against the intelligence store |
+| `lookup_indicator`, `threat_actor_profile`, `technique` | Intelligence lookups (STIX store) |
+| `search_reports` | Hybrid search over the report library; returns passages with chunk IDs to cite |
+
+**Why the output can be trusted** (`src/tip/agent/report.py`). The report is structured JSON. Plain code then checks
+every finding:
+1. it cites evidence;
+2. every cited ID was actually returned by a tool in this run;
+3. its ATT&CK IDs exist;
+4. the people and hosts it names appear in the cited events;
+5. its time falls within them.
+
+Failing findings are kept but marked rejected, with reasons. In live mode the report goes back to Claude once with the
+reasons. Report text and logs are treated as data, never instructions.
+
+Live mode uses Claude Opus 5.5 through the Anthropic SDK: a manual tool loop with strict tool schemas, structured
+output for the report, and server-side refusal fallback (`fallbacks: "default"`), because security content can trip
+safety classifiers.
 
 ## Intelligence sources
 
@@ -105,7 +152,14 @@ src/tip/
   store.py             Postgres STIX store: schema, upsert, search, relationships, observable lookup
   collectors/          attack, kev, ofac, threatfox, lookalike (+ cached downloads)
   logs/generator.py    synthetic Meridian Exchange logs and the attack answer key
+  library/             report library: advisories, ATT&CK write-ups, internal docs; embeddings and hybrid search
+  agent/tools.py       the agent's tools and hunts (the only way the AI touches data)
+  agent/brains.py      mock playbook and Claude (tool loop, structured report)
+  agent/report.py      report schema and the citation verifier
+  agent/graph.py       LangGraph workflow; investigations stored in Postgres
+  api.py               FastAPI for the console
   cli.py               the `./tip` commands
+web/                   React console (Vite, TypeScript)
 tests/                 parsing, STIX validity, generator answer key, store (in a throwaway schema)
 ```
 

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     database_url: str = ""
     abusech_auth_key: str = ""
+    anthropic_api_key: str = ""  # live investigations; empty = the SDK's own lookup (env var or `ant auth login`)
     watch_domains: str = "coinbase.com"
     data_dir: Path = ROOT / "data"
 
