@@ -17,8 +17,8 @@ AI-assisted threat intelligence for a crypto exchange. The platform:
 | 2 | Investigation agent (LangGraph): tools, RAG over reports, cited and verified findings, plus the web console (screens 1-2) | **done** |
 | 3 | Detection engineering: Sigma → SPL / KQL / SQL, replay-tested, human-approved, ATT&CK coverage (console screen 3) | **done** |
 | 4 | Intelligence briefs (technical and executive), evaluation with release gates, prompt-injection defence (screens 4-5) | **done** |
-| 5 | Console polish: demo script, interview Q&A | next |
-| 6 | Go lookalike-domain watcher on Certificate Transparency logs; MISP sync | |
+| 5 | Demo readiness: one-command start, `doctor` and `reset`, demo script, interview Q&A | **done** |
+| 6 | Go lookalike-domain watcher on Certificate Transparency logs; MISP sync | next |
 
 ## Architecture
 
@@ -59,7 +59,12 @@ FastAPI (src/tip/api.py) ─► React console (web/): 1 What's happening · 2 Ar
 
 ## Run it
 
-Requires Docker and [uv](https://docs.astral.sh/uv/).
+**Quickest:** `./scripts/demo.sh` starts Postgres, prepares whatever is missing (intelligence, logs, report library,
+UI build) and serves the console on http://localhost:8000. It's safe to rerun. `./tip doctor` shows what's ready, and
+`./tip reset` clears earlier runs. For presenting it, see **[docs/DEMO.md](docs/DEMO.md)** (click-by-click script) and
+**[docs/INTERVIEW.md](docs/INTERVIEW.md)** (likely questions, honest answers).
+
+Step by step. Requires Docker, [uv](https://docs.astral.sh/uv/) and Node.js 20+:
 
 ```bash
 ./scripts/init-env.sh        # .env with a random database password (never printed)
@@ -257,8 +262,11 @@ src/tip/
 web/                   React console (Vite, TypeScript)
 detections/            approved Sigma rules (written by the review step)
 tests/                 parsing, STIX validity, generator answer key, store (in a throwaway schema)
+scripts/demo.sh        one-command demo start
+docs/                  DEMO.md (demo script), INTERVIEW.md (questions and answers)
 ```
 
 **Why `./tip` and not an installed command:** on a Mac whose Desktop syncs to iCloud, macOS flags everything inside
 `.venv` as hidden. Python skips hidden `.pth` files, which breaks editable installs. So `uv` installs only the
-dependencies, and `./tip` and pytest run the code from `src/`.
+dependencies, and `./tip` and pytest run the code from `src/`. The launcher also finds `uv` when it isn't on your PATH
+(for example `~/.local/bin`).

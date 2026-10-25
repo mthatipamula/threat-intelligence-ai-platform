@@ -264,6 +264,68 @@ def evaluate(live: Annotated[bool, typer.Option(help="Use Claude (costs money)")
     console.print(f"Cost: ${row['results']['cost_usd']}. Run id {run_id}")
 
 
+def readiness() -> dict[str, object]:
+    """What a demo needs, and whether it's there."""
+    from tip.api import WEB_DIST, live_available
+
+    out: dict[str, object] = {"database": False, "intel_objects": 0, "library_chunks": 0}
+    try:
+        with store.connect() as conn:
+            store.init_schema(conn)
+            library.init_schema(conn)
+            out["database"] = True
+            out["intel_objects"] = conn.execute("SELECT count(*) AS n FROM stix_objects").fetchone()["n"]
+            out["library_chunks"] = conn.execute("SELECT count(*) AS n FROM chunks").fetchone()["n"]
+    except Exception as e:  # report, don't crash: doctor exists to explain what's missing
+        out["database_error"] = str(e).split("\n")[0]
+    out["logs"] = settings().logs_db.exists()
+    out["baseline"] = settings().baseline_db.exists()
+    out["web_built"] = (WEB_DIST / "index.html").exists()
+    out["live_mode"] = live_available()
+    return out
+
+
+@app.command()
+def doctor(as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
+    """Check everything the demo needs: database, intelligence, logs, report library, built UI, live mode."""
+    r = readiness()
+    if as_json:
+        console.print_json(json.dumps(r))
+        return
+    checks = [
+        ("Postgres reachable", r["database"], "docker compose up -d --wait"),
+        ("Threat intelligence collected", int(r["intel_objects"]) > 1000, "./tip collect"),
+        ("Report library built", int(r["library_chunks"]) > 0, "./tip library build"),
+        ("Synthetic logs", r["logs"], "./tip logs generate"),
+        ("Fresh normal week", r["baseline"], "./tip logs baseline"),
+        ("Web UI built", r["web_built"], "(cd web && npm install && npm run build)"),
+        ("Live mode (Claude)", r["live_mode"], "optional: add ANTHROPIC_API_KEY to .env"),
+    ]
+    for label, ok, fix in checks:
+        mark = "[green]✓[/green]" if ok else "[red]✕[/red]"
+        console.print(f"{mark} {label}" + ("" if ok else f"  [dim]→ {fix}[/dim]"))
+
+
+@app.command()
+def reset(yes: Annotated[bool, typer.Option("--yes", help="Don't ask")] = False) -> None:
+    """Clear demo history: investigations, detection drafts, briefs, evaluation runs, approved rule files."""
+    from tip import briefs, evals
+    from tip.agent import graph as agent_graph
+    from tip.config import ROOT
+
+    if not yes and not typer.confirm("Delete all investigations, detections, briefs and evaluation runs?"):
+        raise typer.Exit(1)
+    with store.connect() as conn:
+        for init in (agent_graph.init_schema, detections.init_schema, briefs.init_schema, evals.init_schema):
+            init(conn)
+        conn.execute("TRUNCATE investigations, detections, briefs, eval_runs")
+        conn.commit()
+    removed = [p.name for p in (ROOT / "detections").glob("*.yml")]
+    for name in removed:
+        (ROOT / "detections" / name).unlink()
+    console.print(f"Cleared. Removed {len(removed)} approved rule file(s).")
+
+
 @library_app.command("build")
 def library_build() -> None:
     """Fetch advisories, load internal docs and ATT&CK write-ups, chunk and embed them (first run downloads the "

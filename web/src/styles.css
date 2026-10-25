@@ -199,3 +199,4 @@ ul.cited { padding-left: 1.1rem; } ul.cited li { margin-bottom: 0.5rem; }
 .gate.fail { background: var(--critical-soft); border-color: var(--critical); } .gate.fail .gate-mark { color: var(--critical); }
 .gate.n\/a { opacity: 0.75; }
 tr.missed td { color: var(--critical); }
+.actor-switch { margin-bottom: 0.4rem; } .why { margin: 0 0 0.6rem; }
