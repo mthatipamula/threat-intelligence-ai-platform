@@ -18,11 +18,13 @@ db_app = typer.Typer(no_args_is_help=True, help="STIX store database")
 intel_app = typer.Typer(no_args_is_help=True, help="Query collected threat intelligence")
 logs_app = typer.Typer(no_args_is_help=True, help="Synthetic internal logs (the SIEM stand-in)")
 library_app = typer.Typer(no_args_is_help=True, help="Report library for RAG (advisories, ATT&CK, internal docs)")
+misp_app = typer.Typer(no_args_is_help=True, help="Share intelligence through MISP")
 detections_app = typer.Typer(no_args_is_help=True, help="Sigma detections: draft, test, review")
 app.add_typer(db_app, name="db")
 app.add_typer(intel_app, name="intel")
 app.add_typer(logs_app, name="logs")
 app.add_typer(library_app, name="library")
+app.add_typer(misp_app, name="misp")
 app.add_typer(detections_app, name="detections")
 console = Console()
 
@@ -324,6 +326,98 @@ def reset(yes: Annotated[bool, typer.Option("--yes", help="Don't ask")] = False)
     for name in removed:
         (ROOT / "detections" / name).unlink()
     console.print(f"Cleared. Removed {len(removed)} approved rule file(s).")
+
+
+def _latest_investigation(conn) -> str:
+    row = conn.execute(
+        "SELECT id FROM investigations WHERE status = 'done' AND purpose = 'analyst' ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        raise typer.BadParameter("no finished investigation: run `tip investigate` first")
+    return str(row["id"])
+
+
+def _misp_event(kind: str, investigation: str | None) -> dict:
+    from tip import misp
+
+    with store.connect() as conn:
+        if kind == "lookalikes":
+            return misp.lookalike_event(conn)
+        return misp.incident_event(conn, investigation or _latest_investigation(conn))
+
+
+@misp_app.command("export")
+def misp_export(
+    kind: Annotated[str, typer.Argument(help="incident or lookalikes")] = "incident",
+    investigation: Annotated[str | None, typer.Option(help="Investigation id (default: the latest)")] = None,
+    out: Annotated[str | None, typer.Option(help="Write to this file (default: data/misp/<kind>.json)")] = None,
+) -> None:
+    """Write a MISP event (JSON) that MISP can import: an incident's indicators, or our lookalike domains."""
+    from pathlib import Path
+
+    event = _misp_event(kind, investigation)
+    path = Path(out) if out else settings().data_dir / "misp" / f"{kind}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(event, indent=2))
+    e = event["Event"]
+    console.print(
+        f"{path}: {e['info'][:90]} - {len(e['Attribute'])} attributes, {len(e.get('Object', []))} objects, "
+        f"{len(e['Tag'])} tags"
+    )
+
+
+@misp_app.command("push")
+def misp_push(
+    kind: Annotated[str, typer.Argument(help="incident or lookalikes")] = "incident",
+    investigation: Annotated[str | None, typer.Option(help="Investigation id (default: the latest)")] = None,
+) -> None:
+    """Send a MISP event to the MISP server in .env (creates it, or updates the same event on a re-push)."""
+    from tip import misp
+
+    try:
+        result = misp.push(_misp_event(kind, investigation))
+    except misp.MispError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+    console.print(result)
+
+
+@misp_app.command("status")
+def misp_status() -> None:
+    """Check the MISP server in .env is reachable and the API key works."""
+    from tip import misp
+
+    try:
+        console.print(misp.status())
+    except misp.MispError as e:
+        console.print(f"[red]{type(e).__name__}: {e}[/red]")
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def watch(
+    duration: Annotated[str, typer.Option(help="How long, e.g. 2m (Go duration); 0 = until Ctrl-C")] = "2m",
+    replay: Annotated[bool, typer.Option(help="Replay the sample names instead of live CT logs")] = False,
+    port: Annotated[int, typer.Option(help="Port of the running API (./tip serve) to post hits to")] = 8000,
+) -> None:
+    """Run the Go certificate-transparency watcher for the brands in WATCH_DOMAINS, posting hits to the API."""
+    import shutil
+    import subprocess
+
+    from tip.config import ROOT
+
+    go = shutil.which("go") or "/usr/local/go/bin/go"
+    args = [
+        go,
+        "run",
+        ".",
+        "-brands",
+        ",".join(settings().watched_domains),
+        "-post",
+        f"http://localhost:{port}/api/intel/ct-hits",
+    ]
+    args += ["-replay", "testdata/names.txt"] if replay else ["-duration", duration]
+    raise typer.Exit(subprocess.call(args, cwd=ROOT / "watcher"))
 
 
 @library_app.command("build")

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     abusech_auth_key: str = ""
     anthropic_api_key: str = ""  # live investigations; empty = the SDK's own lookup (env var or `ant auth login`)
     watch_domains: str = "coinbase.com"
+    misp_url: str = ""
+    misp_admin_key: str = ""
+    misp_verify_tls: bool = True
     data_dir: Path = ROOT / "data"
 
     @property

@@ -18,7 +18,7 @@ AI-assisted threat intelligence for a crypto exchange. The platform:
 | 3 | Detection engineering: Sigma → SPL / KQL / SQL, replay-tested, human-approved, ATT&CK coverage (console screen 3) | **done** |
 | 4 | Intelligence briefs (technical and executive), evaluation with release gates, prompt-injection defence (screens 4-5) | **done** |
 | 5 | Demo readiness: one-command start, `doctor` and `reset`, demo script, interview Q&A | **done** |
-| 6 | Go lookalike-domain watcher on Certificate Transparency logs; MISP sync | next |
+| 6 | Go certificate-transparency watcher for lookalike domains; MISP export and sync | **done** |
 
 ## Architecture
 
@@ -52,6 +52,9 @@ Briefs                                               Evaluation ("can we trust t
   ─► a person approves ─► Markdown export
 
 Every tool result is screened for prompt injection (instructions aimed at the AI) before the model sees it.
+
+watcher/ (Go)  CT logs (Google, Cloudflare) ─► concurrent fetch + parse ─► lookalike match ─► POST /api/intel/ct-hits
+MISP           incident and lookalike events (JSON export, or push to a MISP server; optional local MISP in compose)
 
 FastAPI (src/tip/api.py) ─► React console (web/): 1 What's happening · 2 Are we affected? · 3 Catch it next time ·
                                                   4 Tell leadership · 5 Can we trust the AI?
@@ -101,6 +104,8 @@ To enable ThreatFox, add a free key from https://auth.abuse.ch to `.env` as `ABU
 ./tip detections test src/tip/detections/templates/browser_secrets_read.yml   # SPL, KQL, SQL + replay test
 ./tip brief --audience executive                               # both briefs, checked; prints one as Markdown
 ./tip eval                                                     # the evaluation and its release gates (--live: Claude)
+./tip watch --duration 2m                                      # Go CT watcher, live (needs Go 1.26+; --replay: offline)
+./tip misp export incident                                     # MISP event file: the incident's indicators
 ```
 
 ## The investigation agent
@@ -202,6 +207,59 @@ the citation verifier. On real content it raises 0 flags in the report library a
 descriptions: ATT&CK's own T1699 "Direct Prompt Injection", which quotes the phrase. The planted cases are tagged
 T1698 "Indirect Prompt Injection".
 
+## Certificate-transparency watcher (Go)
+
+Every publicly trusted TLS certificate must be published in Certificate Transparency logs, usually before the site is
+used. So a phishing domain like `coinbase-allert.live` shows up there hours or days before the first phishing email.
+`watcher/` follows CT logs directly through their RFC 6962 API and reports certificates for domains imitating the
+watched brands:
+
+- **Concurrency:** per log, a dispatcher hands index ranges near the head to a pool of worker goroutines, and one
+  output goroutine de-duplicates hits and posts batches to the API. It reports throughput and lag behind the head every
+  10 seconds (about 350 entries a second from Google Argon in testing).
+- **Parsing:** both entry types, ordinary certificates and precertificates (whose full certificate is in `extra_data`),
+  with Go's standard `crypto/x509`.
+- **Being polite:** a 429 from a log pauses every worker on that log for its `Retry-After`. Ranges are retried, never
+  skipped, since a gap could hide the one certificate that matters.
+- **Matching** (`match.go`): the same typo, homoglyph, keyword and TLD techniques as the Python DNS collector, plus
+  the brand inside any other domain (including hyphen-split, as in `coin-base-help.com`) and one-edit near-misses. The
+  brand's own domains are excluded.
+- **Into the platform:** hits become STIX indicators labelled `certificate-transparency`. A domain found by both DNS
+  and CT is one indicator. Screen 1 shows "Found by: new certificate".
+- **Offline:** `-replay testdata/names.txt` matches a sample list. Replayed hits are stored as low-confidence
+  `sample` data and never touch real indicators.
+
+A live 40-second run found real lookalike certificates (for example `coinbase-allert.live`). **(Limitation)** One
+machine can't keep up with the entire CT firehose; production would shard logs across instances, or use a feed.
+
+```bash
+cd watcher && go run . -brands coinbase.com -duration 2m -post http://localhost:8000/api/intel/ct-hits
+```
+
+## Sharing through MISP
+
+MISP is the open-source threat-sharing platform crypto and financial security teams use with their peers. `tip misp`
+turns verified data into MISP events (`src/tip/misp.py`):
+
+| Event | Contents | Marking |
+|---|---|---|
+| `incident` | Indicators from an investigation's accepted findings: attacker IPs, the lure domain, the backdoor's hash, dropped files, and the sanctioned wallet as a `coin-address` object. Tagged with ATT&CK techniques and the threat groups the report cites (linked to MISP's galaxies) | TLP:AMBER, for an industry ISAC |
+| `lookalikes` | Domains imitating our brand, from DNS and CT. Not marked for automatic blocking, since each needs triage | TLP:GREEN |
+
+Indicators are filtered for shareability: a file hash that also appears in normal activity, such as the system `curl`
+binary, is dropped, so partners don't flag every machine. Events have stable UUIDs, so a re-push updates the event
+instead of duplicating it.
+
+```bash
+./tip misp export incident                 # data/misp/incident.json; also downloadable from screens 1 and 4
+docker compose --profile misp up -d        # optional local MISP 2.5 (MariaDB, Valkey, PHP-FPM, nginx); https://localhost:8443
+./tip misp status && ./tip misp push incident
+```
+
+Verified against MISP 2.5.50: both events are created, a re-push updates rather than duplicates, the wallet object is
+saved, and 2 threat-actor and 11 ATT&CK galaxy clusters are linked. `./scripts/init-env.sh` adds the MISP secrets to
+`.env` and creates a self-signed certificate. The first start takes several minutes.
+
 ## Intelligence sources
 
 | Source | Becomes | Notes |
@@ -256,10 +314,12 @@ src/tip/
   detections/templates/  the rule drafts mock mode uses (one per attacker behaviour)
   agent/injection.py   prompt-injection screening of every tool result
   briefs/              facts from evidence, executive and technical briefs, the brief checker, Markdown export
+  misp.py              MISP event export and push
   evals/               the evaluation run and its release gates
   api.py               FastAPI for the console
   cli.py               the `./tip` commands
 web/                   React console (Vite, TypeScript)
+watcher/               Go certificate-transparency watcher (ct.go: RFC 6962 client, match.go: lookalikes, main.go)
 detections/            approved Sigma rules (written by the review step)
 tests/                 parsing, STIX validity, generator answer key, store (in a throwaway schema)
 scripts/demo.sh        one-command demo start

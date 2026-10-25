@@ -31,3 +31,16 @@ jobs:
         with: { node-version: 24, cache: npm, cache-dependency-path: web/package-lock.json }
       - run: npm ci
       - run: npm run build   # TypeScript type check + production build
+
+  watcher:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: watcher } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: watcher/go.mod, cache-dependency-path: watcher/go.sum }
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Offline replay finds the sample lookalikes
+        run: test "$(go run . -brands coinbase.com -replay testdata/names.txt 2>/dev/null | wc -l)" -eq 12

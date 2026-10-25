@@ -149,6 +149,8 @@ export function Briefs() {
               Download: <a href={briefsApi.markdownUrl(brief.id, 'executive')}>executive brief (.md)</a> ·{' '}
               <a href={briefsApi.markdownUrl(brief.id, 'technical')}>technical brief (.md)</a>
               {brief.status !== 'approved' && <span className="muted"> (marked DRAFT until approved)</span>}
+              {' · '}<a href={`/api/misp/incident?investigation_id=${brief.investigation_id}`}>indicators as a MISP event (.json)</a>
+              <span className="muted"> for sharing with industry partners (TLP:AMBER)</span>
             </div>
           </section>
 

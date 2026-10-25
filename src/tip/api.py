@@ -1,5 +1,6 @@
 """HTTP API for the review console (and anyone else). Serves the built web UI from web/dist when it exists."""
 
+import json
 import os
 import re
 import shutil
@@ -14,7 +15,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from tip import briefs, detections, evals, library, store
+from tip import briefs, detections, evals, library, stix, store
 from tip.agent import graph
 from tip.agent.brains import MODEL
 from tip.agent.tools import LOG_TABLES, is_event_id, is_stix_id
@@ -117,9 +118,10 @@ def actor(name: str, conn: DB) -> dict[str, Any]:
 def signals(conn: DB) -> dict[str, Any]:
     library.init_schema(conn)
     lookalikes = conn.execute(
-        "SELECT observable_value AS domain, data->'x_tip_resolved_ips' AS ips, data->'labels' AS labels, last_seen "
-        "FROM stix_objects WHERE source = 'lookalike' AND type = 'indicator' AND NOT revoked "
-        "ORDER BY observable_value LIMIT 50"
+        "SELECT observable_value AS domain, data->'x_tip_resolved_ips' AS ips, data->'labels' AS labels, last_seen, "
+        "source AS found_by, data->'x_tip_ct' AS ct FROM stix_objects "
+        "WHERE source IN ('lookalike', 'ct-watcher') AND type = 'indicator' AND NOT revoked "
+        "ORDER BY (source = 'ct-watcher') DESC, last_seen DESC, observable_value LIMIT 60"
     ).fetchall()
     chains = conn.execute(
         "SELECT chain, count(*) AS addresses FROM stix_objects, jsonb_array_elements_text(data->'x_tip_chains') chain "
@@ -207,6 +209,56 @@ def evidence(evidence_id: str, conn: DB) -> dict[str, Any]:
         if chunk:
             return {**chunk, "doc_kind": chunk["kind"], "kind": "report"}
     raise HTTPException(404, f"No evidence {evidence_id!r}")
+
+
+class CTHits(BaseModel):
+    hits: list[dict[str, Any]] = Field(max_length=500)
+
+
+@app.post("/api/intel/ct-hits")
+def ct_hits(req: CTHits, conn: DB) -> dict[str, int]:
+    """Lookalike certificates from the Go CT watcher (watcher/), stored as STIX indicators. Local API, no auth."""
+    from tip.collectors.lookalike import from_ct_hit
+
+    valid = [h for h in req.hits if isinstance(h.get("domain"), str) and isinstance(h.get("brand"), str)]
+    objects: list[Any] = [stix.identity("ct-watcher")]
+    for hit in valid:
+        new = stix.to_dict(from_ct_hit(hit))
+        old = store.get(conn, new["id"])
+        if old and "sample" in new["labels"]:
+            continue  # replayed demo data never touches a real indicator
+        if old and old.get("x_tip_resolved_ips") is not None:
+            # also found by the DNS collector: one indicator with both findings, nothing lost
+            new["labels"] = sorted(set(old.get("labels", [])) | set(new["labels"]))
+            new["x_tip_resolved_ips"] = old["x_tip_resolved_ips"]
+            new["created"] = old["created"]
+            new["confidence"] = max(old.get("confidence") or 0, new.get("confidence") or 0)
+        objects.append(new)
+    written = store.upsert(conn, objects, "ct-watcher")
+    return {"received": len(req.hits), "stored": written - 1}
+
+
+@app.get("/api/misp/{kind}")
+def misp_event(kind: Literal["incident", "lookalikes"], conn: DB, investigation_id: str | None = None):
+    """A MISP event (JSON) to download and import into MISP: an incident's indicators or our lookalike domains."""
+    from tip import misp
+
+    try:
+        if kind == "lookalikes":
+            event = misp.lookalike_event(conn)
+        else:
+            if not investigation_id:
+                raise HTTPException(400, "investigation_id is required for an incident event")
+            event = misp.incident_event(conn, investigation_id)
+    except (ValueError, psycopg.errors.InvalidTextRepresentation) as e:
+        conn.rollback()
+        raise HTTPException(400, str(e).split("\n")[0]) from e
+    name = f"misp-{kind}-{(investigation_id or 'all')[:8]}.json"
+    return PlainTextResponse(
+        json.dumps(event, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 # ---------------------------------------------------------------- detections (step 3)

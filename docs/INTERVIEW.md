@@ -134,6 +134,18 @@ Which of a threat group's known ATT&CK techniques we have a tested rule for. It'
 not a score. Some of our rules also cover techniques ATT&CK doesn't yet list for that group, because they come from
 our own incident.
 
+**Why Go for the certificate watcher?**
+It's a long-running, high-volume, concurrent job: several logs at once, a pool of fetchers per log, parsing, matching
+and posting, at hundreds of certificates a second, in a small static binary with low memory. Goroutines and channels
+make that pipeline natural, and the standard library parses both certificates and precertificates. The intelligence
+model, AI and API stay in Python; the watcher just posts hits.
+
+**What do you share, and how?**
+MISP events, the format peers already use. An incident event carries the indicators from verified findings, tagged
+with ATT&CK techniques and the cited threat groups, at TLP:AMBER for an industry ISAC. I filter for shareability: a
+hash that also appears in normal activity (the system curl binary) is dropped, because sharing it would make partners
+flag every machine. Lookalike domains go out at TLP:GREEN without auto-blocking, since they still need triage.
+
 ## Crypto-specific
 
 **Why does OFAC matter for an exchange?**
@@ -168,7 +180,8 @@ North Korea. Those advisories are in the report library.
 - A pattern-based injection scanner.
 - Mock mode is scripted.
 - Single-user, with no authentication.
-- The lookalike-domain check is DNS-based rather than streaming certificate-transparency logs (planned in Go).
+- The Go CT watcher follows a few logs from one machine. It can't keep up with the whole CT firehose; production
+  would shard logs across instances.
 
 **How would you brief an executive differently from an engineer?**
 Executives get the bottom line in the first sentence, impact in dollars and legal exposure, a stated confidence with

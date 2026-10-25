@@ -46,6 +46,12 @@ Everything runs in **mock mode**: free, offline and repeatable. If live mode is 
 > "On the right, early warnings, all collected automatically: domains impersonating a big exchange, sanctioned wallet
 > addresses we must never pay, government advisories, and vulnerabilities being exploited right now."
 
+**(10 min)** Point at "Found by: new certificate" in the lookalike table:
+
+> "Those come from a Go service that watches Certificate Transparency logs live. Every TLS certificate is published
+> there, so a phishing domain shows up before the first phishing email. In testing it found real ones, like
+> coinbase-allert.live."
+
 **(10 min)** Hover a dotted term such as *OFAC*:
 
 > "Every term has a plain-English definition, because these screens get shown to non-specialists."
@@ -128,7 +134,9 @@ Everything runs in **mock mode**: free, offline and repeatable. If live mode is 
 
 **(10 min)** Scroll the technical brief's indicator table, then show the **Download** links:
 
-> "These are the IPs, domains, hashes and the wallet to block. Approved briefs export as Markdown."
+> "These are the IPs, domains, hashes and the wallet to block. Approved briefs export as Markdown, and the indicators
+> export as a MISP event, the format crypto security teams use to share with each other, tagged with ATT&CK and the
+> threat group."
 
 ## 5. Can we trust the AI? (45 seconds)
 

@@ -26,6 +26,7 @@ SOURCES: dict[str, dict[str, str]] = {
     },
     "threatfox": {"name": "abuse.ch ThreatFox", "url": "https://threatfox.abuse.ch"},
     "lookalike": {"name": "Lookalike domain discovery (DNS)", "url": "https://datatracker.ietf.org/doc/html/rfc1035"},
+    "ct-watcher": {"name": "Certificate Transparency watcher", "url": "https://datatracker.ietf.org/doc/html/rfc6962"},
 }
 
 # STIX patterns for the observable types we produce. Crypto wallets have no standard STIX observable,
