@@ -1,0 +1,20 @@
+title: New access key created for a service user
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1008
+status: experimental
+description: >-
+  Someone creates a long-lived access key for a service account. Attackers do this to keep access after the original
+  break-in is cleaned up; service keys should only be issued by the deployment pipeline.
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.persistence, attack.t1098.001]
+logsource: {product: meridian, service: cloud_audit}
+detection:
+  selection:
+    action: 'iam:CreateAccessKey'
+    resource|contains: ':user/svc-'
+  filter_pipeline:
+    principal|startswith: 'role/deploy'
+  condition: selection and not filter_pipeline
+falsepositives:
+  - Planned key rotation done by hand; should go through the pipeline instead
+level: high

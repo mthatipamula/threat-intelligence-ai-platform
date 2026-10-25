@@ -622,13 +622,32 @@ PREFIX = {
     "wallet_withdrawals": "wdr",
 }
 TABLES = list(PREFIX)
+EMPTY_SCHEMAS = {
+    "scenario_events": "event_id VARCHAR, table_name VARCHAR, step BIGINT, technique_id VARCHAR, "
+    "description VARCHAR, ts TIMESTAMPTZ"
+}
 
 
-def generate(out_dir: Path, db_path: Path, seed: int = 7, days: int = 7) -> dict[str, int]:
-    """Write one JSONL file per log source plus the answer key, and load them all into DuckDB. Returns row counts."""
-    gen = Generator(seed=seed, days=days)
+BASELINE_SEED, BASELINE_START = 21, datetime(2026, 10, 19, tzinfo=UTC)  # a later week, different people and noise
+
+
+def generate(
+    out_dir: Path,
+    db_path: Path,
+    seed: int = 7,
+    days: int = 7,
+    start: datetime = datetime(2026, 10, 12, tzinfo=UTC),
+    with_attack: bool = True,
+) -> dict[str, int]:
+    """Write one JSONL file per log source plus the answer key, and load them all into DuckDB. Returns row counts.
+
+    with_attack=False produces a normal-only week (the "baseline"): detections are tested on it to catch rules that
+    would fire on ordinary activity they were never shown.
+    """
+    gen = Generator(seed=seed, start=start, days=days)
     gen.benign()
-    gen.attack()
+    if with_attack:  # without it: a normal-only week, for checking detections don't fire on ordinary activity
+        gen.attack()
     out_dir.mkdir(parents=True, exist_ok=True)
     tables = {**gen.events, "scenario_events": gen.answer_key}
     for name, rows in tables.items():
@@ -638,7 +657,10 @@ def generate(out_dir: Path, db_path: Path, seed: int = 7, days: int = 7) -> dict
                 f.write(json.dumps({**row, "ts": row["ts"].isoformat()}) + "\n")
     db_path.unlink(missing_ok=True)
     with duckdb.connect(str(db_path)) as con:
-        for name in tables:
+        for name, rows in tables.items():
+            if not rows:  # e.g. the answer key of a normal-only week: no rows to infer columns from
+                con.execute(f"CREATE TABLE {name} ({EMPTY_SCHEMAS[name]})")
+                continue
             con.execute(
                 f"CREATE TABLE {name} AS SELECT * REPLACE (CAST(ts AS TIMESTAMPTZ) AS ts) "
                 f"FROM read_json_auto(?, format='newline_delimited', sample_size=-1)",

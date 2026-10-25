@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from tip import collectors, library, store
+from tip import collectors, detections, library, store
 from tip.agent import graph
 from tip.config import settings
 from tip.logs import generator
@@ -18,10 +18,12 @@ db_app = typer.Typer(no_args_is_help=True, help="STIX store database")
 intel_app = typer.Typer(no_args_is_help=True, help="Query collected threat intelligence")
 logs_app = typer.Typer(no_args_is_help=True, help="Synthetic internal logs (the SIEM stand-in)")
 library_app = typer.Typer(no_args_is_help=True, help="Report library for RAG (advisories, ATT&CK, internal docs)")
+detections_app = typer.Typer(no_args_is_help=True, help="Sigma detections: draft, test, review")
 app.add_typer(db_app, name="db")
 app.add_typer(intel_app, name="intel")
 app.add_typer(logs_app, name="logs")
 app.add_typer(library_app, name="library")
+app.add_typer(detections_app, name="detections")
 console = Console()
 
 
@@ -129,6 +131,83 @@ def logs_sql(query: str, limit: int = 50) -> None:
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r, strict=True)) for r in cur.fetchmany(limit)]
     _table(rows)
+
+
+@logs_app.command("baseline")
+def logs_baseline() -> None:
+    """Generate a fresh normal-only week (no attack) for testing detections against false alarms."""
+    counts = generator.generate(
+        settings().data_dir / "baseline",
+        settings().baseline_db,
+        seed=generator.BASELINE_SEED,
+        start=generator.BASELINE_START,
+        with_attack=False,
+    )
+    _table([{"table": k, "rows": v} for k, v in counts.items()], "data/baseline.duckdb")
+
+
+@detections_app.command("draft")
+def detections_draft(
+    investigation: Annotated[str | None, typer.Option(help="Investigation id (default: the latest finished)")] = None,
+    live: Annotated[bool, typer.Option(help="Use Claude instead of the mock templates")] = False,
+) -> None:
+    """Draft and replay-test a rule for each behaviour in an investigation's verified findings."""
+    with store.connect() as conn:
+        if investigation is None:
+            row = conn.execute(
+                "SELECT id FROM investigations WHERE status = 'done' ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            if not row:
+                raise typer.BadParameter("no finished investigation: run `tip investigate` first")
+            investigation = str(row["id"])
+        batch = detections.start_batch(conn, investigation)
+    with console.status("drafting and testing rules..."):
+        detections.run_batch(batch, investigation, "live" if live else "mock")
+    with store.connect() as conn:
+        rows = detections.listing(conn, batch)
+    _table(
+        [
+            {
+                "status": d["status"],
+                "rule": d["title"],
+                "caught": (d["test"] or {}).get("attack_events_caught"),
+                "false alarms": (d["test"] or {}).get("false_alarms"),
+                "fresh week": (d["test"] or {}).get("fresh_week_alarms"),
+                "attempts": len(d["attempts"]),
+                "id": str(d["id"])[:8],
+            }
+            for d in rows
+        ],
+        f"Batch {batch}",
+    )
+
+
+@detections_app.command("test")
+def detections_test(path: str) -> None:
+    """Convert and replay-test any Sigma rule file, e.g. `tip detections test detections/my_rule.yml`."""
+    from pathlib import Path
+
+    result = detections.evaluate(Path(path).read_text())
+    t = result["test"]
+    console.print(
+        f"[bold]{result['title']}[/bold]: {t['verdict']} {('- ' + '; '.join(t['reasons'])) if t['reasons'] else ''}"
+    )
+    console.print({k: t.get(k) for k in ("table", "attack_events_caught", "false_alarms", "fresh_week_alarms")})
+    translations = result["translations"]
+    for target in ("sql", "spl", "kql"):
+        console.print(f"[bold]{target.upper()}[/bold]\n{translations[target] or translations['errors'].get(target)}")
+
+
+@detections_app.command("review")
+def detections_review(detection_id: str, approve: bool = True, reviewer: str = "analyst", note: str = "") -> None:
+    """Approve (writes detections/<rule>.yml) or reject (--no-approve) a tested rule. Accepts an id prefix."""
+    with store.connect() as conn:
+        detections.init_schema(conn)
+        row = conn.execute("SELECT id FROM detections WHERE id::text LIKE %s", [detection_id + "%"]).fetchone()
+        if not row:
+            raise typer.BadParameter("no such detection")
+        d = detections.review(conn, str(row["id"]), "approve" if approve else "reject", reviewer, note)
+    console.print(f"{d['status']}: {d['title']}" + (f" -> {d['approved_path']}" if d["approved_path"] else ""))
 
 
 @library_app.command("build")

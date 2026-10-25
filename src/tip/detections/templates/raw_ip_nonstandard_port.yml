@@ -1,0 +1,19 @@
+title: Connection to a raw IP address on a non-standard port
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1004
+status: experimental
+description: >-
+  A laptop connects straight to an IP address (no domain name) on a port other than 80 or 443. Malware command and
+  control servers commonly listen on unusual ports such as 1224 or 1245.
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.command-and-control, attack.t1571, attack.t1105]
+logsource: {category: network_connection, product: macos}
+detection:
+  selection:
+    DestinationHostname: null
+  filter_web:
+    DestinationPort: [80, 443]
+  condition: selection and not filter_web
+falsepositives:
+  - Developer test servers and VPN clients; scope to known corporate ranges
+level: high

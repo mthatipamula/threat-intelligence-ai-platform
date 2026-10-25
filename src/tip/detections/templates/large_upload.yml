@@ -1,0 +1,17 @@
+title: Large upload from a laptop in one connection
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1005
+status: experimental
+description: >-
+  A single connection sends more than 10 MB out. On its own this is common (backups, uploads); it matters when the
+  destination is uncategorised or the sending process is unusual.
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.exfiltration, attack.t1041]
+logsource: {category: network_connection, product: macos}
+detection:
+  selection:
+    BytesSent|gt: 10000000
+  condition: selection
+falsepositives:
+  - Large legitimate uploads (video calls, file sharing); combine with destination reputation in production
+level: medium

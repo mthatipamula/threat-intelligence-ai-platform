@@ -1,0 +1,19 @@
+title: Program started from a hidden folder in a home directory
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1002
+status: experimental
+description: >-
+  A command line runs something from a hidden folder directly under a user's home directory (for example ~/.n2/).
+  Backdoors such as InvisibleFerret hide there; legitimate tools almost always live in /Applications or /usr.
+references:
+  - https://www.ic3.gov/PSA/2024/PSA240903
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.execution, attack.t1059.006, attack.defense-evasion, attack.t1564.001]
+logsource: {category: process_creation, product: macos}
+detection:
+  selection:
+    CommandLine|re: '/Users/[^/]+/\.[^/]+/'
+  condition: selection
+falsepositives:
+  - Developer tools installed per user (~/.nvm, ~/.cargo, ~/.pyenv); exclude them by path
+level: high

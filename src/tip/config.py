@@ -38,6 +38,11 @@ class Settings(BaseSettings):
         return self.data_dir / "logs.duckdb"
 
     @property
+    def baseline_db(self) -> Path:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        return self.data_dir / "baseline.duckdb"
+
+    @property
     def watched_domains(self) -> list[str]:
         return [d.strip().lower() for d in self.watch_domains.split(",") if d.strip()]
 

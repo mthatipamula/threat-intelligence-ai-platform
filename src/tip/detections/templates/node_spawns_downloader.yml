@@ -1,0 +1,20 @@
+title: Node or npm starts a download or scripting tool
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1001
+status: experimental
+description: >-
+  A Node.js process (often an npm install script) starts curl, wget, Python or a shell. Malicious npm packages used in
+  fake job-interview "coding tests" do this to fetch and run a second-stage backdoor. Normal builds rarely do.
+references:
+  - https://www.ic3.gov/PSA/2024/PSA240903
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.execution, attack.t1059.007, attack.command-and-control, attack.t1105]
+logsource: {category: process_creation, product: macos}
+detection:
+  selection:
+    ParentImage|endswith: ['node', 'npm', 'npx']
+    Image|endswith: ['curl', 'wget', 'python', 'python3', '/sh', '/bash', '/zsh']
+  condition: selection
+falsepositives:
+  - Packages with legitimate install scripts that download binaries (e.g. browser drivers); allow-list them by hash
+level: high
