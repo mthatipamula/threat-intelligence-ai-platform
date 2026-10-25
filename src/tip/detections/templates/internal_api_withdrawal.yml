@@ -1,0 +1,19 @@
+title: Hot-wallet withdrawal initiated with an API key
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1009
+status: experimental
+description: >-
+  A withdrawal from the hot wallet is started through the internal API with a service key instead of by a customer.
+  Treasury moves are rare and scheduled; an unexpected one is how stolen withdrawal keys are cashed out.
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.impact, attack.t1657]
+logsource: {product: meridian, service: wallet_withdrawals}
+detection:
+  selection_channel:
+    channel: internal-api
+  selection_key:
+    initiated_by|startswith: 'api-key:'
+  condition: 1 of selection_*
+falsepositives:
+  - Scheduled treasury rebalancing; match against the treasury calendar
+level: critical

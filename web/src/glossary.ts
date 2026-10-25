@@ -14,5 +14,12 @@ export const GLOSSARY: Record<string, string> = {
   'hot wallet': 'A crypto wallet whose keys are online so withdrawals can be automated. Convenient, and therefore a prime target.',
   KEV: 'CISA’s Known Exploited Vulnerabilities list: software flaws attackers are actively using right now. Patch these first.',
   RAG: 'Retrieval-augmented generation: the AI searches a document library and must ground its answer in the passages it finds.',
+  Sigma: 'An open, vendor-neutral format for detection rules. Write the logic once in YAML, then convert it to Splunk, Microsoft Sentinel or any other SIEM\u2019s query language.',
+  SIEM: 'Security information and event management: the system that collects a company\u2019s logs and runs detection rules over them (Splunk, Microsoft Sentinel, Google SecOps).',
+  SPL: 'Splunk\u2019s query language.',
+  KQL: 'Kusto Query Language, used by Microsoft Sentinel and Defender.',
+  'false alarm': 'An alert on normal activity. Too many and analysts start ignoring the rule, so a good detection must be quiet on ordinary days.',
+  'replay test': 'Running a rule over recorded logs where we know exactly which events were the attack, to measure what it catches and what it wrongly flags.',
+  'detection-as-code': 'Keeping detection rules as files in a code repository: reviewed, versioned and deployed like software.',
   verifier: 'Plain code (not AI) that checks every AI finding cites real evidence the tools returned. Unsupported findings are rejected.',
 };

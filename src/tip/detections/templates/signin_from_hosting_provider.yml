@@ -1,0 +1,20 @@
+title: Sign-in without MFA from a hosting provider network
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1006
+status: experimental
+description: >-
+  A successful sign-in with no MFA step from a cloud or VPS provider's network. Employees sign in from offices, homes
+  and hotels, not from servers; attackers replaying stolen session cookies usually do it from rented servers.
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.lateral-movement, attack.t1550.004]
+logsource: {product: meridian, service: auth_events}
+detection:
+  selection:
+    outcome: success
+    asn|contains: ['VPS', 'Hosting', 'Cloud', 'Datacenter', 'Server']
+  filter_mfa:
+    mfa_method|exists: true
+  condition: selection and not filter_mfa
+falsepositives:
+  - Employees using a commercial VPN that exits from a hosting provider
+level: high

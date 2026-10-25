@@ -20,6 +20,10 @@ dependencies = [
     "fastembed>=0.9.1",
     "pgvector>=0.5.1",
     "beautifulsoup4>=4.15.0",
+    "pysigma>=1.5.1",
+    "pysigma-backend-splunk>=2.1.0",
+    "pysigma-backend-kusto>=1.0.1",
+    "pysigma-backend-sqlite>=2.0.0",
 ]
 
 [dependency-groups]

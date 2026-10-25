@@ -1,0 +1,17 @@
+title: Visit to a newly registered domain
+id: 3f2b7c1e-8a4d-4f0b-9c61-2d7e5a9b1010
+status: experimental
+description: >-
+  An employee opens a domain the web proxy classifies as newly registered. Phishing and fake-recruiter sites are
+  usually days old. Noisy on its own: best used to raise the priority of other alerts for the same person.
+author: threat-intelligence-ai-platform (draft)
+date: 2026-10-25
+tags: [attack.initial-access, attack.t1566.003]
+logsource: {product: meridian, service: network_events}
+detection:
+  selection:
+    category: newly-registered
+  condition: selection
+falsepositives:
+  - New legitimate SaaS vendors and marketing sites
+level: low

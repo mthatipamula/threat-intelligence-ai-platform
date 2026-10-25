@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { Detections } from './pages/Detections';
 import { Investigate } from './pages/Investigate';
 import { World } from './pages/World';
 
 const SCREENS = [
   { id: 'world', n: 1, label: 'What’s happening', ready: true },
   { id: 'investigate', n: 2, label: 'Are we affected?', ready: true },
-  { id: 'detections', n: 3, label: 'Catch it next time', ready: false, step: 3 },
+  { id: 'detections', n: 3, label: 'Catch it next time', ready: true },
   { id: 'briefs', n: 4, label: 'Tell leadership', ready: false, step: 4 },
   { id: 'trust', n: 5, label: 'Can we trust the AI?', ready: false, step: 4 },
 ] as const;
@@ -37,11 +38,11 @@ export function App() {
               <span className="step">{s.n}</span>{s.label}
             </a>
           ) : (
-            <span key={s.id} className="soon" title={`Coming in build step ${s.step}`}><span className="step">{s.n}</span>{s.label}</span>
+            <span key={s.id} className="soon" title={`Coming in build step ${'step' in s ? s.step : ''}`}><span className="step">{s.n}</span>{s.label}</span>
           ))}
         </nav>
       </header>
-      <main>{screen === 'world' ? <World /> : <Investigate />}</main>
+      <main>{screen === 'world' ? <World /> : screen === 'detections' ? <Detections /> : <Investigate />}</main>
       <footer className="muted small">
         Portfolio project. Intelligence from public sources (MITRE ATT&CK, CISA, FBI, OFAC); company logs are synthetic.
       </footer>

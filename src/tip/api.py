@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from tip import library, store
+from tip import detections, library, store
 from tip.agent import graph
 from tip.agent.brains import MODEL
 from tip.agent.tools import LOG_TABLES, is_event_id, is_stix_id
@@ -207,6 +207,81 @@ def evidence(evidence_id: str, conn: DB) -> dict[str, Any]:
         if chunk:
             return {**chunk, "doc_kind": chunk["kind"], "kind": "report"}
     raise HTTPException(404, f"No evidence {evidence_id!r}")
+
+
+# ---------------------------------------------------------------- detections (step 3)
+
+
+class DraftRequest(BaseModel):
+    investigation_id: str
+    mode: Literal["mock", "live"] = "mock"
+
+
+@app.post("/api/detections", status_code=202)
+def draft_detections(req: DraftRequest, conn: DB) -> dict[str, str]:
+    """Draft and replay-test rules for an investigation's verified findings (runs in the background)."""
+    if req.mode == "live" and not live_available():
+        raise HTTPException(400, "Live mode needs ANTHROPIC_API_KEY in .env (or `ant auth login`). Use mock mode.")
+    try:
+        batch_id = detections.start_batch(conn, req.investigation_id)
+    except (ValueError, psycopg.errors.InvalidTextRepresentation) as e:
+        conn.rollback()
+        raise HTTPException(400, str(e).split("\n")[0]) from e
+    detections.run_batch_in_background(batch_id, req.investigation_id, req.mode)
+    return {"batch_id": batch_id}
+
+
+@app.get("/api/detections")
+def list_detections(conn: DB, batch_id: str | None = None) -> list[dict[str, Any]]:
+    return detections.listing(conn, batch_id)
+
+
+class ReviewRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+    reviewer: str = Field(min_length=1, max_length=80)
+    note: str = Field(default="", max_length=500)
+
+
+@app.post("/api/detections/{det_id}/review")
+def review_detection(det_id: str, req: ReviewRequest, conn: DB) -> dict[str, Any]:
+    try:
+        return detections.review(conn, det_id, req.decision, req.reviewer.strip(), req.note.strip())
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+class RuleText(BaseModel):
+    sigma_yaml: str = Field(min_length=10, max_length=20000)
+
+
+@app.post("/api/detections/evaluate")
+def evaluate_rule(req: RuleText) -> dict[str, Any]:
+    """Convert and replay-test any Sigma rule (for editing a draft and trying again)."""
+    try:
+        return detections.evaluate(req.sigma_yaml)
+    except Exception as e:  # bad YAML or an unsupported rule: report it, don't 500
+        raise HTTPException(400, f"{type(e).__name__}: {e}"[:500]) from e
+
+
+@app.get("/api/coverage/actors")
+def coverage_actors(conn: DB) -> list[str]:
+    """North Korean groups in ATT&CK, for the coverage selector (Contagious Interview first: it fits the scenario)."""
+    rows = conn.execute(
+        "SELECT name FROM stix_objects WHERE type = 'intrusion-set' AND NOT revoked "
+        "AND data->>'description' ~* 'north korea|dprk' ORDER BY name"
+    ).fetchall()
+    names = [r["name"] for r in rows]
+    return sorted(names, key=lambda n: (n != "Contagious Interview", n != "Lazarus Group", n))
+
+
+@app.get("/api/coverage")
+def coverage(conn: DB, actor: str = "Contagious Interview") -> dict[str, Any]:
+    try:
+        return detections.coverage(conn, actor)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
 
 
 # ---------------------------------------------------------------- the built UI (npm run build in web/)

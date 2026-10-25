@@ -15,8 +15,8 @@ AI-assisted threat intelligence for a crypto exchange. The platform:
 |---|---|---|
 | 1 | Local stack, OSINT collection, STIX 2.1 store, synthetic logs with a hidden attack | **done** |
 | 2 | Investigation agent (LangGraph): tools, RAG over reports, cited and verified findings, plus the web console (screens 1-2) | **done** |
-| 3 | Detection engineering: Sigma → SPL / KQL / SQL, replay-tested against the logs (console screen 3) | next |
-| 4 | Intelligence briefs (technical and executive), evals, prompt-injection tests (screens 4-5) | |
+| 3 | Detection engineering: Sigma → SPL / KQL / SQL, replay-tested, human-approved, ATT&CK coverage (console screen 3) | **done** |
+| 4 | Intelligence briefs (technical and executive), evals, prompt-injection tests (screens 4-5) | next |
 | 5 | Console polish: approve or reject detections and briefs; demo script | |
 | 6 | Go lookalike-domain watcher on Certificate Transparency logs; MISP sync | |
 
@@ -40,7 +40,12 @@ Report library (Postgres + pgvector)                 Investigation (LangGraph)
   Meridian incidents and runbooks (synthetic)          brain: mock playbook (free) or Claude Opus 5.5 (live)
   hybrid search: local embeddings + full text, RRF
 
-FastAPI (src/tip/api.py) ─► React console (web/): 1 What's happening · 2 Are we affected? · 3-5 coming
+Detections (Sigma)
+  verified finding ─► draft rule (mock template or Claude) ─► convert: SPL · KQL (Sentinel ASIM) · SQL (DuckDB)
+      ─► replay test: attack caught? false alarms this week? alerts on a fresh normal-only week?
+      ─► failed: revise once │ passed: a person approves ─► detections/<rule>.yml (status: test)
+
+FastAPI (src/tip/api.py) ─► React console (web/): 1 What's happening · 2 Are we affected? · 3 Catch it next time · 4-5 coming
 ```
 
 ## Run it
@@ -53,6 +58,7 @@ docker compose up -d --wait  # Postgres (pgvector) on localhost:5433
 uv sync                      # dependencies
 ./tip collect                # all collectors; about 15 seconds after the first ATT&CK download
 ./tip logs generate          # 7 days of synthetic logs with the hidden attack
+./tip logs baseline          # a fresh normal-only week, for testing detections against false alarms
 ./tip library build          # advisories + ATT&CK + internal docs, embedded (first run downloads ~130 MB model)
 (cd web && npm install && npm run build)
 ./tip serve                  # console and API on http://localhost:8000
@@ -77,6 +83,8 @@ To enable ThreatFox, add a free key from https://auth.abuse.ch to `.env` as `ABU
 ./tip logs sql "SELECT strftime(ts,'%a %H:%M') t, step, technique_id, description FROM scenario_events ORDER BY ts"
 ./tip library search "fake recruiter coding test"             # hybrid search over the report library
 ./tip investigate "Are we affected by fake job interview attacks?"   # add --live for Claude
+./tip detections draft                                         # rules for the latest investigation's findings
+./tip detections test src/tip/detections/templates/browser_secrets_read.yml   # SPL, KQL, SQL + replay test
 ```
 
 ## The investigation agent
@@ -106,6 +114,33 @@ reasons. Report text and logs are treated as data, never instructions.
 Live mode uses Claude Opus 5.5 through the Anthropic SDK: a manual tool loop with strict tool schemas, structured
 output for the report, and server-side refusal fallback (`fallbacks: "default"`), because security content can trip
 safety classifiers.
+
+## Detection engineering
+
+An investigation explains what happened once; a detection rule catches it automatically next time. Rules are written
+in [Sigma](https://sigmahq.io), so the same logic converts to whichever SIEM a company runs:
+
+| Target | How (`src/tip/detections/sigma_engine.py`) |
+|---|---|
+| Splunk (SPL) | pySigma Splunk backend |
+| Microsoft Sentinel (KQL) | pySigma Kusto backend with the Sentinel ASIM pipeline: standard rules land on normalised tables (`imProcessCreate`, `imNetworkSession`), company-specific rules on `Meridian*_CL` custom tables |
+| This demo's log store (SQL) | pySigma's SQLite backend adapted to DuckDB: case-insensitive matching, DuckDB regex, Sigma fields such as `ParentImage` and `TargetFilename` mapped to our columns |
+
+**Replay test** (`testing.py`). A rule is run over this week's logs and scored against the attack answer key: how many
+attack events it caught (overall, and of those tagged with its techniques) and how many normal events it flagged. It
+is then run over a **fresh normal-only week** it has never seen (`./tip logs baseline`), so a rule can't pass just by
+being written while looking at this week's data. It passes when it catches the attack, with at most 2 false alarms a
+week on each dataset. A failed draft goes back once with the reasons and sample false alarms.
+
+In mock mode, the first draft of the "person reads a secret" rule is deliberately too broad. The test fails it (about
+8 false alarms a day, because people read staging secrets routinely), and the revised rule, limited to production
+secrets, passes. Synthetic normal activity is tidier than a real company's, so "passed" means "deploy in test mode and
+watch", not "proven quiet in production".
+
+**Review.** Only rules that passed can be approved. Approval writes the rule to `detections/` with `status: test` and
+an "Approved by" line (detection-as-code); withdrawing it removes the file. The coverage panel shows which of a North
+Korean group's ATT&CK techniques the rules detect. It defaults to G1052 *Contagious Interview*, the group ATT&CK
+tracks for exactly this fake-interview tradecraft.
 
 ## Intelligence sources
 
@@ -157,9 +192,12 @@ src/tip/
   agent/brains.py      mock playbook and Claude (tool loop, structured report)
   agent/report.py      report schema and the citation verifier
   agent/graph.py       LangGraph workflow; investigations stored in Postgres
+  detections/          Sigma conversion (SPL, KQL, DuckDB SQL), replay testing, drafting, review, coverage
+  detections/templates/  the rule drafts mock mode uses (one per attacker behaviour)
   api.py               FastAPI for the console
   cli.py               the `./tip` commands
 web/                   React console (Vite, TypeScript)
+detections/            approved Sigma rules (written by the review step)
 tests/                 parsing, STIX validity, generator answer key, store (in a throwaway schema)
 ```
 

@@ -70,3 +70,36 @@ export const api = {
     call<{ id: string }>('/investigations', { method: 'POST', body: JSON.stringify({ question, mode }) }),
   evidence: (id: string) => call<Evidence>(`/evidence/${encodeURIComponent(id)}`),
 };
+
+// ---------------------------------------------------------------- detections (step 3)
+
+export interface TestResult {
+  verdict: 'passed' | 'failed'; reasons: string[]; table?: string; scanned?: number;
+  attack_events_caught?: number; expected_for_techniques?: number; caught_of_expected?: number;
+  false_alarms?: number; fresh_week_scanned?: number; fresh_week_alarms?: number;
+  sample_attack_hits?: Record<string, string>[]; sample_false_alarms?: Record<string, string>[];
+  sample_fresh_week_alarms?: Record<string, string>[];
+}
+export interface Detection {
+  id: string; batch_id: string; investigation_id: string | null; mode: string; finding: string | null;
+  title: string | null; description: string | null; level: string | null; technique_ids: string[];
+  sigma_yaml: string | null; status: 'drafting' | 'passed' | 'failed' | 'approved' | 'rejected' | 'error';
+  translations: { sql: string | null; spl: string | null; kql: string | null; table: string | null; errors: Record<string, string> } | null;
+  test: TestResult | null; attempts: { yaml: string; verdict: string; reasons: string[]; note: string | null }[];
+  reviewer: string | null; review_note: string | null; approved_path: string | null; error: string | null;
+  created_at: string; reviewed_at: string | null;
+}
+export interface Coverage {
+  actor: string; total: number; covered: number; pending: number; beyond_actor: string[];
+  techniques: { id: string; name: string; tactics: string[]; approved: string[]; pending: string[] }[];
+}
+
+export const detectionsApi = {
+  draft: (investigation_id: string, mode: 'mock' | 'live') =>
+    call<{ batch_id: string }>('/detections', { method: 'POST', body: JSON.stringify({ investigation_id, mode }) }),
+  list: (batchId?: string) => call<Detection[]>(`/detections${batchId ? `?batch_id=${batchId}` : ''}`),
+  review: (id: string, decision: 'approve' | 'reject', reviewer: string, note: string) =>
+    call<Detection>(`/detections/${id}/review`, { method: 'POST', body: JSON.stringify({ decision, reviewer, note }) }),
+  coverageActors: () => call<string[]>('/coverage/actors'),
+  coverage: (actor: string) => call<Coverage>(`/coverage?actor=${encodeURIComponent(actor)}`),
+};
