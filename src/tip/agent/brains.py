@@ -113,6 +113,7 @@ class MockBrain:
             ("match_logs_to_intel", {}),
             *[("run_hunt", {"hunt": h}) for h in HUNTS],
             ("threat_actor_profile", {"name": "Lazarus Group"}),
+            ("threat_actor_profile", {"name": "Contagious Interview"}),
             (
                 "search_reports",
                 {"query": "North Korea fake recruiter coding test npm malware crypto developers", "limit": 4},
@@ -269,6 +270,7 @@ class MockBrain:
             extra_ids=[m["indicator_id"] for m in sanctioned],
         )
 
+        critical = [x for x in f if x["severity"] == "critical"]  # real findings only, before the simulated one
         if self.simulate:  # an unsupported claim on purpose: the verifier must reject it
             f.append(
                 {
@@ -284,8 +286,17 @@ class MockBrain:
         f.sort(key=lambda x: x["when"])
 
         context = []
+        group = self._result("threat_actor_profile", name="Contagious Interview")
+        if group.get("stix_id") and critical:
+            context.append(
+                {
+                    "statement": f"ATT&CK tracks this fake job-interview tradecraft as {group['name']} "
+                    f"(also {', '.join(group['aliases'][1:4])}), a North Korean group targeting developers.",
+                    "evidence_ids": [group["stix_id"]],
+                }
+            )
         actor = self._result("threat_actor_profile", name="Lazarus Group")
-        if actor.get("stix_id"):
+        if actor.get("stix_id") and critical:
             dream = [c for c in actor["campaigns"] if "Dream Job" in c["name"]]
             context.append(
                 {
@@ -295,7 +306,7 @@ class MockBrain:
                     "evidence_ids": [actor["stix_id"]] + [c["stix_id"] for c in dream],
                 }
             )
-        for query in ("North Korea fake recruiter coding test npm malware crypto developers",):
+        for query in ("North Korea fake recruiter coding test npm malware crypto developers",) if critical else ():
             for p in self._result("search_reports", query=query, limit=4).get("passages", [])[:2]:
                 context.append(
                     {
@@ -304,7 +315,6 @@ class MockBrain:
                     }
                 )
 
-        critical = [x for x in f if x["severity"] == "critical"]
         victim = node[0]["user_name"] if node else "an engineer"
         summary = (
             (
@@ -312,8 +322,8 @@ class MockBrain:
                 "laptop. The malware stole browser session cookies and wallet data; that night the attacker reused "
                 "the session to read the hot-wallet API key, create a persistent access key and withdraw about "
                 f"${total:,.0f} in crypto, including to an OFAC-sanctioned address. The techniques match public "
-                "reporting on North Korean (Lazarus / TraderTraitor) operations against crypto companies; attribution "
-                "is assessed as likely, not confirmed."
+                "reporting on North Korean operations against crypto companies (ATT&CK's Contagious Interview group "
+                "and TraderTraitor); attribution is assessed as likely, not confirmed."
             )
             if critical
             else "No evidence of compromise was found."
@@ -332,11 +342,23 @@ class MockBrain:
                     "Notify Legal: funds reached an OFAC-sanctioned address, which must be reported to OFAC.",
                     "Engage blockchain analytics partners to trace and flag the stolen funds.",
                     "Block the recruiter domain and the attacker IP addresses at the proxy and firewall.",
-                ],
-                "open_questions": [
-                    "Did the backdoor reach any other machines or accounts?",
-                    "Which recruiter profile and messaging channel delivered the lure?",
-                    "Was the pending withdrawal stopped before broadcast?",
+                ]
+                if critical
+                else ["Keep the hunts scheduled daily; re-run this investigation if any of them start matching."],
+                "open_questions": (
+                    [
+                        "Did the backdoor reach any other machines or accounts?",
+                        "Which recruiter profile and messaging channel delivered the lure?",
+                        "Was the pending withdrawal stopped before broadcast?",
+                    ]
+                    if critical
+                    else []
+                )
+                + [
+                    f"Evidence {w['evidence'] or w['path']} contains text that tries to instruct an AI "
+                    f"({w['reasons']}). "
+                    "It was not followed; treat it as possible attacker activity (T1698 indirect prompt injection)."
+                    for w in tools.injection_warnings
                 ],
             }
         ).model_dump()

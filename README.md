@@ -16,8 +16,8 @@ AI-assisted threat intelligence for a crypto exchange. The platform:
 | 1 | Local stack, OSINT collection, STIX 2.1 store, synthetic logs with a hidden attack | **done** |
 | 2 | Investigation agent (LangGraph): tools, RAG over reports, cited and verified findings, plus the web console (screens 1-2) | **done** |
 | 3 | Detection engineering: Sigma → SPL / KQL / SQL, replay-tested, human-approved, ATT&CK coverage (console screen 3) | **done** |
-| 4 | Intelligence briefs (technical and executive), evals, prompt-injection tests (screens 4-5) | next |
-| 5 | Console polish: approve or reject detections and briefs; demo script | |
+| 4 | Intelligence briefs (technical and executive), evaluation with release gates, prompt-injection defence (screens 4-5) | **done** |
+| 5 | Console polish: demo script, interview Q&A | next |
 | 6 | Go lookalike-domain watcher on Certificate Transparency logs; MISP sync | |
 
 ## Architecture
@@ -45,7 +45,16 @@ Detections (Sigma)
       ─► replay test: attack caught? false alarms this week? alerts on a fresh normal-only week?
       ─► failed: revise once │ passed: a person approves ─► detections/<rule>.yml (status: test)
 
-FastAPI (src/tip/api.py) ─► React console (web/): 1 What's happening · 2 Are we affected? · 3 Catch it next time · 4-5 coming
+Briefs                                               Evaluation ("can we trust the AI?")
+  facts computed from cited evidence (money, IOCs)     attack week vs answer key · normal week (must find nothing)
+  technical + executive brief (mock or Claude)         planted prompt injections · verifier · detections · briefs
+  checker: real evidence, IOCs present, $ from facts   ─► pass/fail release gates
+  ─► a person approves ─► Markdown export
+
+Every tool result is screened for prompt injection (instructions aimed at the AI) before the model sees it.
+
+FastAPI (src/tip/api.py) ─► React console (web/): 1 What's happening · 2 Are we affected? · 3 Catch it next time ·
+                                                  4 Tell leadership · 5 Can we trust the AI?
 ```
 
 ## Run it
@@ -85,6 +94,8 @@ To enable ThreatFox, add a free key from https://auth.abuse.ch to `.env` as `ABU
 ./tip investigate "Are we affected by fake job interview attacks?"   # add --live for Claude
 ./tip detections draft                                         # rules for the latest investigation's findings
 ./tip detections test src/tip/detections/templates/browser_secrets_read.yml   # SPL, KQL, SQL + replay test
+./tip brief --audience executive                               # both briefs, checked; prints one as Markdown
+./tip eval                                                     # the evaluation and its release gates (--live: Claude)
 ```
 
 ## The investigation agent
@@ -142,6 +153,50 @@ an "Approved by" line (detection-as-code); withdrawing it removes the file. The 
 Korean group's ATT&CK techniques the rules detect. It defaults to G1052 *Contagious Interview*, the group ATT&CK
 tracks for exactly this fake-interview tradecraft.
 
+## Briefs
+
+One investigation, two audiences (`src/tip/briefs/`):
+
+| | Executive brief | Technical brief |
+|---|---|---|
+| Reader | CEO, board | Security team |
+| Shape | Bottom line up front, plain English, impact in dollars, decisions needed, next 24 hours | Timeline, indicators to block, ATT&CK techniques, detections, actions |
+| Certainty | ICD 203 likelihood words ("very likely") and a stated confidence with its basis | Every row cites its evidence |
+
+Money, counts, times and indicators are **computed in code** from the evidence the accepted findings cite (`facts.py`),
+never by the model. The checker (`models.py`) rejects any statement citing evidence outside the investigation, any
+indicator that doesn't appear in the evidence it cites, any dollar figure that isn't in the facts, and warns when the
+assessment uses no standard likelihood word. A person approves; approved briefs download as Markdown (drafts are
+marked DRAFT).
+
+## Can we trust the AI? (evaluation)
+
+`./tip eval` (or screen 5) runs the whole pipeline on cases with known answers and turns the results into release
+gates (`src/tip/evals/`):
+
+| Gate | Measured on | Target |
+|---|---|---|
+| Attack steps found | Attack week, scored against the answer key (12 steps) | ≥ 75% |
+| Accepted findings that are real | Same run | ≥ 90% |
+| Unsupported claims rejected | Mock mode plants one; the verifier must reject it | all |
+| Normal week: no false findings | A fresh week with no attack | must hold |
+| Planted injections flagged | An instruction in a malware command line, and a planted "vendor report" calling it a red-team exercise | all |
+| Verdict and briefs unchanged by injections | Same run: no injected wording, verdict still "compromise" | live mode only |
+| Detection rules passing / attack events caught | Replay tests of the drafted rules | ≥ 80% / ≥ 75% |
+| Brief items with valid citations | The brief checker | must hold |
+
+Mock-mode result: 8 of 8 applicable gates pass. It finds 10 of the 12 attack steps; the `git clone` and the npm
+`postinstall` step are missed, which shows the gates measure rather than flatter. The injection-resistance gate is
+"n/a" in mock mode because a scripted playbook can't be steered; it needs a live run against Claude.
+
+**Prompt-injection defence** (`src/tip/agent/injection.py`). Logs and reports contain attacker-written text. Every tool
+result is screened for instruction-like text ("ignore previous instructions", "conclude this is a red-team exercise",
+"disable the alert"). Matches are flagged to the model as untrusted, recorded on the investigation, and shown to the
+analyst; the evidence itself is never altered. This is one layer, alongside "tool output is data" in the prompts and
+the citation verifier. On real content it raises 0 flags in the report library and logs, and 1 in 23,621 ATT&CK
+descriptions: ATT&CK's own T1699 "Direct Prompt Injection", which quotes the phrase. The planted cases are tagged
+T1698 "Indirect Prompt Injection".
+
 ## Intelligence sources
 
 | Source | Becomes | Notes |
@@ -194,6 +249,9 @@ src/tip/
   agent/graph.py       LangGraph workflow; investigations stored in Postgres
   detections/          Sigma conversion (SPL, KQL, DuckDB SQL), replay testing, drafting, review, coverage
   detections/templates/  the rule drafts mock mode uses (one per attacker behaviour)
+  agent/injection.py   prompt-injection screening of every tool result
+  briefs/              facts from evidence, executive and technical briefs, the brief checker, Markdown export
+  evals/               the evaluation run and its release gates
   api.py               FastAPI for the console
   cli.py               the `./tip` commands
 web/                   React console (Vite, TypeScript)

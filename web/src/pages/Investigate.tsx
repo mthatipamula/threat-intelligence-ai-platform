@@ -117,6 +117,18 @@ export function Investigate() {
         </section>
       )}
 
+      {run && run.injection_warnings && run.injection_warnings.length > 0 && (
+        <section className="card injection">
+          <h3>⚠ Possible <Term name="prompt injection" /> in the evidence</h3>
+          <p className="small">These records contain text that tries to give the AI instructions. They were flagged to the AI as untrusted and
+            not followed; treat them as attacker activity (ATT&amp;CK T1698).</p>
+          <ul className="small">{run.injection_warnings.map((w, i) => (
+            <li key={i}><button className="link mono" onClick={() => w.evidence && setEvidence(w.evidence)}>{w.evidence || w.path}</button> · {w.reasons}
+              <div className="muted mono excerpt">{w.excerpt}</div></li>
+          ))}</ul>
+        </section>
+      )}
+
       {report && checks && verdict && (
         <>
           <section className={`card verdict ${verdict.tone}`}>

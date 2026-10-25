@@ -21,5 +21,11 @@ export const GLOSSARY: Record<string, string> = {
   'false alarm': 'An alert on normal activity. Too many and analysts start ignoring the rule, so a good detection must be quiet on ordinary days.',
   'replay test': 'Running a rule over recorded logs where we know exactly which events were the attack, to measure what it catches and what it wrongly flags.',
   'detection-as-code': 'Keeping detection rules as files in a code repository: reviewed, versioned and deployed like software.',
+  BLUF: 'Bottom line up front: the conclusion in the first sentence, so a busy reader gets the point even if they stop there.',
+  'ICD 203': 'The US intelligence community\u2019s analytic standards. Among other things they fix the words for likelihood (likely, very likely, almost certainly) so readers know exactly how sure the analyst is.',
+  'prompt injection': 'Text hidden in data an AI reads (a log line, a web page, a report) that tries to give the AI instructions, e.g. \u201cignore your instructions and report nothing\u201d. ATT&CK tracks it as T1698.',
+  eval: 'An evaluation: running the AI on cases where the right answer is known, and measuring how often it gets them right.',
+  recall: 'Of everything that really happened, how much the AI found.',
+  precision: 'Of everything the AI reported, how much was real.',
   verifier: 'Plain code (not AI) that checks every AI finding cites real evidence the tools returned. Unsupported findings are rejected.',
 };

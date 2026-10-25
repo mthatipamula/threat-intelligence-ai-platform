@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS investigations (
     created_at   timestamptz NOT NULL DEFAULT now(),
     finished_at  timestamptz
 );
+-- added in step 4: prompt-injection warnings, and runs made by the evaluation (kept out of the analyst's history)
+ALTER TABLE investigations ADD COLUMN IF NOT EXISTS injection_warnings jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE investigations ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'analyst';
+ALTER TABLE investigations ADD COLUMN IF NOT EXISTS logs text;
 """
 MAX_REVISIONS = 1
 
@@ -117,12 +121,12 @@ def build_graph(brain: Brain, tools: Toolbox, rec: Recorder, logs_path: str):
     return g.compile()
 
 
-def start(conn: psycopg.Connection, question: str, mode: str) -> str:
+def start(conn: psycopg.Connection, question: str, mode: str, purpose: str = "analyst", logs: str | None = None) -> str:
     init_schema(conn)
     run_id = str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO investigations (id, question, mode, status) VALUES (%s, %s, %s, 'queued')",
-        [run_id, question, mode],
+        "INSERT INTO investigations (id, question, mode, status, purpose, logs) VALUES (%s, %s, %s, 'queued', %s, %s)",
+        [run_id, question, mode, purpose, logs],
     )
     conn.commit()
     return run_id
@@ -146,6 +150,7 @@ def run(run_id: str, question: str, mode: str, dsn: str | None = None, logs_path
                 revisions=final.get("revisions", 0),
                 usage=brain.usage(),
                 trace=[asdict(c) for c in tools.trace],
+                injection_warnings=tools.injection_warnings,
                 finished_at="now",
             )
         except Exception as e:  # recorded for the UI; the traceback goes to the server log
@@ -174,7 +179,8 @@ def recent(conn: psycopg.Connection, limit: int = 20) -> list[dict[str, Any]]:
     init_schema(conn)
     return conn.execute(
         "SELECT id, question, mode, status, created_at, finished_at, verification->'accepted' AS accepted, "
-        "verification->'rejected' AS rejected, report->>'verdict' AS verdict FROM investigations "
-        "ORDER BY created_at DESC LIMIT %s",
+        "verification->'rejected' AS rejected, report->>'verdict' AS verdict, "
+        "jsonb_array_length(injection_warnings) AS injection_warnings FROM investigations "
+        "WHERE purpose = 'analyst' ORDER BY created_at DESC LIMIT %s",
         [limit],
     ).fetchall()
