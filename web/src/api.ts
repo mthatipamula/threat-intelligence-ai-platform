@@ -39,6 +39,7 @@ export interface Investigation {
   verification: { findings: Check[]; context: Check[]; accepted: number; rejected: number; passed: boolean } | null;
   usage: { model_calls: number; input_tokens: number; output_tokens: number; estimated_cost_usd: number; fallbacks: string[] } | null;
   created_at: string; finished_at: string | null;
+  injection_warnings?: { path: string; evidence: string; reasons: string; excerpt: string }[];
 }
 export interface InvestigationSummary {
   id: string; question: string; mode: string; status: string; created_at: string; accepted: number | null;
@@ -102,4 +103,60 @@ export const detectionsApi = {
     call<Detection>(`/detections/${id}/review`, { method: 'POST', body: JSON.stringify({ decision, reviewer, note }) }),
   coverageActors: () => call<string[]>('/coverage/actors'),
   coverage: (actor: string) => call<Coverage>(`/coverage?actor=${encodeURIComponent(actor)}`),
+};
+
+// ---------------------------------------------------------------- briefs and evaluation (step 4)
+
+export interface Cited { text: string; evidence_ids: string[] }
+export interface BriefItemCheck { section: string; item: string; status: 'accepted' | 'rejected'; problems: string[] }
+export interface Brief {
+  id: string; investigation_id: string; mode: string; status: 'writing' | 'ready' | 'approved' | 'rejected' | 'failed';
+  facts: { money: { withdrawn_usd: number; pending_usd: number; attempted_usd: number; to_sanctioned_usd: number };
+    people: string[]; hosts: string[]; first_event: string | null; last_event: string | null; hours_first_to_last: number | null } | null;
+  technical: {
+    title: string; summary: string;
+    timeline: { when: string; what: string; technique_ids: string[]; evidence_ids: string[] }[];
+    indicators: { type: string; value: string; context: string; evidence_ids: string[] }[];
+    techniques: { technique_id: string; name: string; how_used: string; evidence_ids: string[] }[];
+    detections: Cited[]; actions: string[]; open_questions: string[];
+  } | null;
+  executive: {
+    headline: string; assessment: string; confidence: string; confidence_basis: string;
+    key_points: Cited[]; impact: Cited[]; decisions_needed: string[]; next_24_hours: string[];
+  } | null;
+  verification: { items: BriefItemCheck[]; accepted: number; rejected: number; warnings: string[]; passed: boolean } | null;
+  revisions: number; reviewer: string | null; review_note: string | null; error: string | null;
+  usage: { estimated_cost_usd: number } | null; created_at: string;
+}
+
+export interface Gate { key: string; label: string; value: number | boolean | null; op: string; threshold: number | null; status: 'pass' | 'fail' | 'n/a' }
+export interface EvalResults {
+  gates?: Gate[]; cost_usd?: number;
+  accuracy?: { steps: { step: number; technique_id: string; description: string; found: boolean; by: string | null }[];
+    steps_found: number; steps_total: number; accepted_findings: number; real_findings: number; false_findings: string[];
+    rejected_findings: number; rejected_titles: string[]; verdict: string };
+  no_attack_week?: { verdict: string; accepted_findings: number; rejected_findings: number; titles: string[] };
+  injection?: { cases: { case: string; where: string; technique: string; reached_ai: boolean; flagged: boolean }[];
+    verdict: string; steered_phrases: string[]; resisted: boolean; applicable: boolean };
+  detections?: { rules: number; passed: number; attack_events_caught: number; attack_events_total: number;
+    false_alarms: number; fresh_week_alarms: number; revised: number;
+    rules_detail: { title: string; status: string; attempts: number; caught: number; false_alarms: number }[] };
+  briefs?: { status: string; verification: { accepted: number; rejected: number; warnings: string[] } };
+}
+export interface EvalRun { id: string; mode: string; status: 'running' | 'done' | 'failed'; progress: string[]; results: EvalResults | null; error: string | null; started_at: string; finished_at: string | null }
+export interface EvalSummary { id: string; mode: string; status: string; started_at: string; cost_usd: number | null; passed: number; failed: number }
+
+export const briefsApi = {
+  write: (investigation_id: string, mode: 'mock' | 'live') =>
+    call<{ id: string }>('/briefs', { method: 'POST', body: JSON.stringify({ investigation_id, mode }) }),
+  latest: (investigationId: string) => call<Brief | null>(`/briefs?investigation_id=${investigationId}`),
+  get: (id: string) => call<Brief>(`/briefs/${id}`),
+  review: (id: string, decision: 'approve' | 'reject', reviewer: string, note: string) =>
+    call<Brief>(`/briefs/${id}/review`, { method: 'POST', body: JSON.stringify({ decision, reviewer, note }) }),
+  markdownUrl: (id: string, audience: 'executive' | 'technical') => `/api/briefs/${id}/markdown?audience=${audience}`,
+};
+export const evalsApi = {
+  start: (mode: 'mock' | 'live') => call<{ id: string }>('/evals', { method: 'POST', body: JSON.stringify({ mode }) }),
+  list: () => call<EvalSummary[]>('/evals'),
+  get: (id: string) => call<EvalRun>(`/evals/${id}`),
 };

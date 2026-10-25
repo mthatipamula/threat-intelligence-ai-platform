@@ -20,6 +20,7 @@ import duckdb
 import psycopg
 
 from tip import library, store
+from tip.agent import injection
 from tip.config import settings
 
 LOG_TABLES = ["auth_events", "endpoint_events", "network_events", "cloud_audit", "wallet_withdrawals"]
@@ -104,6 +105,7 @@ class ToolCall:
     summary: str
     error: str | None = None
     at: str = field(default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds"))
+    injection_warnings: list[dict[str, str]] = field(default_factory=list)
 
 
 class ToolError(Exception):
@@ -128,6 +130,7 @@ class Toolbox:
         self.pg = pg
         self.logs_path = logs_path or str(settings().logs_db)
         self.ledger: set[str] = set()
+        self.injection_warnings: list[dict[str, str]] = []
         self.trace: list[ToolCall] = []
         self._columns: dict[str, list[str]] | None = None
 
@@ -160,12 +163,17 @@ class Toolbox:
         if fn is None:
             return {"error": f"unknown tool {name!r}"}
         try:
-            return fn(**args)
+            result = fn(**args)
         except (ToolError, TypeError, duckdb.Error, psycopg.Error) as e:
             if isinstance(e, psycopg.Error):
                 self.pg.rollback()
             self.trace.append(ToolCall(name, args, [], "", error=str(e)))
             return {"error": str(e)}
+        warnings = injection.screen(result)  # attacker-written text in logs or reports must not steer the model
+        if warnings and self.trace:
+            self.trace[-1].injection_warnings = warnings
+            self.injection_warnings.extend(warnings)
+        return injection.annotate(result, warnings)
 
     # ------------------------------------------------------------ tools
 

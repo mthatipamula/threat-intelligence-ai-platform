@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from tip import collectors, detections, library, store
+from tip import briefs, collectors, detections, evals, library, store
 from tip.agent import graph
 from tip.config import settings
 from tip.logs import generator
@@ -208,6 +208,60 @@ def detections_review(detection_id: str, approve: bool = True, reviewer: str = "
             raise typer.BadParameter("no such detection")
         d = detections.review(conn, str(row["id"]), "approve" if approve else "reject", reviewer, note)
     console.print(f"{d['status']}: {d['title']}" + (f" -> {d['approved_path']}" if d["approved_path"] else ""))
+
+
+@app.command()
+def brief(
+    investigation: Annotated[str | None, typer.Option(help="Investigation id (default: the latest finished)")] = None,
+    live: Annotated[bool, typer.Option(help="Use Claude instead of the mock templates")] = False,
+    audience: Annotated[str, typer.Option(help="executive or technical")] = "executive",
+) -> None:
+    """Write and check both briefs for an investigation, and print one as Markdown."""
+    with store.connect() as conn:
+        if investigation is None:
+            row = conn.execute(
+                "SELECT id FROM investigations WHERE status = 'done' AND purpose = 'analyst' "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            if not row:
+                raise typer.BadParameter("no finished investigation: run `tip investigate` first")
+            investigation = str(row["id"])
+        brief_id = briefs.start(conn, investigation, "live" if live else "mock")
+    with console.status("writing and checking briefs..."):
+        briefs.run(brief_id)
+    with store.connect() as conn:
+        row = briefs.get(conn, brief_id)
+    if row["status"] != "ready":
+        console.print(f"[red]{row['status']}[/red]: {row['error']}")
+        raise typer.Exit(1)
+    console.print(briefs.markdown(row, audience))
+    v = row["verification"]
+    console.print(
+        f"{v['accepted']} cited items accepted, {v['rejected']} rejected; warnings: {v['warnings'] or 'none'}"
+    )
+
+
+@app.command(name="eval")
+def evaluate(live: Annotated[bool, typer.Option(help="Use Claude (costs money)")] = False) -> None:
+    """Run the evaluation (accuracy, no-attack week, prompt injection, detections, briefs) and print the gates."""
+    mode = "live" if live else "mock"
+    with store.connect() as conn:
+        run_id = evals.start(conn, mode)
+    with console.status(f"evaluating ({mode})..."):
+        evals.run(run_id, mode)
+    with store.connect() as conn:
+        row = evals.get(conn, run_id)
+    if row["status"] != "done":
+        console.print(f"[red]failed[/red]: {row['error']}")
+        raise typer.Exit(1)
+    _table(
+        [
+            {"gate": g["label"], "status": g["status"], "value": g["value"], "threshold": g["threshold"]}
+            for g in row["results"]["gates"]
+        ],
+        f"Evaluation ({mode})",
+    )
+    console.print(f"Cost: ${row['results']['cost_usd']}. Run id {run_id}")
 
 
 @library_app.command("build")

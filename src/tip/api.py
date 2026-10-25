@@ -10,11 +10,11 @@ from typing import Annotated, Any, Literal
 import duckdb
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from tip import detections, library, store
+from tip import briefs, detections, evals, library, store
 from tip.agent import graph
 from tip.agent.brains import MODEL
 from tip.agent.tools import LOG_TABLES, is_event_id, is_stix_id
@@ -282,6 +282,102 @@ def coverage(conn: DB, actor: str = "Contagious Interview") -> dict[str, Any]:
         return detections.coverage(conn, actor)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
+
+
+# ---------------------------------------------------------------- briefs and evaluation (step 4)
+
+
+class BriefRequest(BaseModel):
+    investigation_id: str
+    mode: Literal["mock", "live"] = "mock"
+
+
+@app.post("/api/briefs", status_code=202)
+def write_briefs(req: BriefRequest, conn: DB) -> dict[str, str]:
+    if req.mode == "live" and not live_available():
+        raise HTTPException(400, "Live mode needs ANTHROPIC_API_KEY in .env (or `ant auth login`). Use mock mode.")
+    try:
+        brief_id = briefs.start(conn, req.investigation_id, req.mode)
+    except (ValueError, psycopg.errors.InvalidTextRepresentation) as e:
+        conn.rollback()
+        raise HTTPException(400, str(e).split("\n")[0]) from e
+    briefs.run_in_background(brief_id)
+    return {"id": brief_id}
+
+
+@app.get("/api/briefs")
+def latest_brief(investigation_id: str, conn: DB) -> dict[str, Any] | None:
+    try:
+        return briefs.latest_for(conn, investigation_id)
+    except psycopg.errors.InvalidTextRepresentation:
+        conn.rollback()
+        return None
+
+
+@app.get("/api/briefs/{brief_id}")
+def get_brief(brief_id: str, conn: DB) -> dict[str, Any]:
+    try:
+        row = briefs.get(conn, brief_id)
+    except psycopg.errors.InvalidTextRepresentation:
+        row = None
+    if not row:
+        raise HTTPException(404, "No such brief")
+    return row
+
+
+@app.post("/api/briefs/{brief_id}/review")
+def review_brief(brief_id: str, req: ReviewRequest, conn: DB) -> dict[str, Any]:
+    try:
+        return briefs.review(conn, brief_id, req.decision, req.reviewer.strip(), req.note.strip())
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/briefs/{brief_id}/markdown")
+def brief_markdown(brief_id: str, conn: DB, audience: Literal["executive", "technical"] = "executive"):
+    row = get_brief(brief_id, conn)
+    if row["status"] not in ("ready", "approved"):
+        raise HTTPException(400, "The brief isn't ready")
+    name = f"{audience}-brief-{str(row['investigation_id'])[:8]}.md"
+    return PlainTextResponse(
+        briefs.markdown(row, audience),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+class EvalRequest(BaseModel):
+    mode: Literal["mock", "live"] = "mock"
+
+
+@app.post("/api/evals", status_code=202)
+def start_eval(req: EvalRequest, conn: DB) -> dict[str, str]:
+    if req.mode == "live" and not live_available():
+        raise HTTPException(400, "Live mode needs ANTHROPIC_API_KEY in .env (or `ant auth login`). Use mock mode.")
+    try:
+        run_id = evals.start(conn, req.mode)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    evals.run_in_background(run_id, req.mode)
+    return {"id": run_id}
+
+
+@app.get("/api/evals")
+def list_evals(conn: DB) -> list[dict[str, Any]]:
+    return evals.recent(conn)
+
+
+@app.get("/api/evals/{run_id}")
+def get_eval(run_id: str, conn: DB) -> dict[str, Any]:
+    try:
+        row = evals.get(conn, run_id)
+    except psycopg.errors.InvalidTextRepresentation:
+        row = None
+    if not row:
+        raise HTTPException(404, "No such evaluation run")
+    return row
 
 
 # ---------------------------------------------------------------- the built UI (npm run build in web/)
